@@ -45,6 +45,7 @@ type KafkaOutputConfig struct {
 	SASL        *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
 	TLS         *common.KafkaTLSConfig      `yaml:"tls,omitempty"`
 	Key         string                      `yaml:"key"`
+	Idempotent  *bool                       `yaml:"idempotent,omitempty"`
 }
 
 // ElasticsearchOutputConfig holds Elasticsearch-specific config.
@@ -426,6 +427,8 @@ func (out *Output) Start() error {
 			msgChan,
 			out.kafkaCfg.Key,
 			out.kafkaCfg.TLS,
+			// default idempotent true if not specified
+			(out.kafkaCfg.Idempotent == nil) || (out.kafkaCfg.Idempotent != nil && *out.kafkaCfg.Idempotent),
 		)
 		if err != nil {
 			out.SetStatus(common.StatusError, fmt.Errorf("failed to create kafka producer for output %s: %v", out.Id, err))

@@ -102,6 +102,7 @@ func NewKafkaProducer(
 	msgChan chan map[string]interface{},
 	keyField string,
 	tlsCfg *KafkaTLSConfig,
+	idempotentEnabled bool,
 ) (*KafkaProducer, error) {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
@@ -134,6 +135,11 @@ func NewKafkaProducer(
 			return nil, err
 		}
 		opts = append(opts, tlsOpt)
+	}
+
+	// Control idempotent producer (default enabled). If disabled, avoid InitProducerID requiring cluster ACL.
+	if !idempotentEnabled {
+		opts = append(opts, kgo.DisableIdempotentWrite())
 	}
 
 	cl, err := kgo.NewClient(opts...)

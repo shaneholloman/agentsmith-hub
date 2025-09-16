@@ -110,6 +110,10 @@ kafka:
     - "localhost:9092"
   topic: "output-topic"
   compression: "none"
+  # Optional: control idempotent producer (default true). If your Kafka account lacks
+  # cluster-level IdempotentWrite ACL and you cannot update ACLs, set this to false
+  # to avoid idempotent initialization.
+  # idempotent: false
   # Uncomment below for SASL authentication
   # sasl:
   #   enable: true

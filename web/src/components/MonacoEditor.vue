@@ -1646,6 +1646,24 @@ function getInputValueCompletions(context, range, fullText) {
       }
     });
   }
+
+  // idempotent 布尔值补全（kafka 输出）
+  else if (context.currentKey === 'idempotent' && (context.currentSection === 'kafka')) {
+    const boolValues = ['true', 'false'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    boolValues.forEach(val => {
+      if (!currentValue || val.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: val,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: val === 'true' ? 'Enable idempotent write (default)' : 'Disable idempotent write (may avoid IdempotentWrite ACL)',
+          insertText: val,
+          range: range,
+          sortText: val.toLowerCase().startsWith(currentValue) ? `0_${val}` : `1_${val}`
+        });
+      }
+    });
+  }
   
   // Cursor_position attribute value completion
   else if (context.currentKey === 'cursor_position') {
@@ -2426,7 +2444,8 @@ function getOutputKeyCompletions(context, range, fullText) {
       { key: 'key', desc: 'Partition key for Kafka messages' },
       { key: 'compression', desc: 'Message compression type' },
       { key: 'sasl', desc: 'SASL authentication configuration' },
-      { key: 'tls', desc: 'TLS configuration' }
+      { key: 'tls', desc: 'TLS configuration' },
+      { key: 'idempotent', desc: 'Enable idempotent write (default true). Set false to avoid IdempotentWrite ACL.' }
     ];
     
     kafkaKeys.forEach(item => {
