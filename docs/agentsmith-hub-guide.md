@@ -29,6 +29,7 @@ kafka:
   topic: "security_events"
   group: "agentsmith_consumer"
   compression: "snappy"  # Optional: none, snappy, gzip
+  balancer: "RangeAndCooperativeSticky" # Optional: RangeAndCooperativeSticky,RangeAndRoundRobin,StickyAndCooperativeSticky,RoundRobinAndCooperativeSticky,CooperativeSticky,Sticky,Range,RoundRobin
   # SASL Authentication (optional)
   sasl:
     enable: true
@@ -160,6 +161,7 @@ kafka:
   topic: "processed_events"
   key: "user_id"  # Optional: specify message key field
   compression: "snappy"  # Optional: none, snappy, gzip
+  idempotent: true
   # SASL Authentication (optional)
   sasl:
     enable: true

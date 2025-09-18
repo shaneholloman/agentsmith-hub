@@ -29,6 +29,7 @@ kafka:
   topic: "security_events"
   group: "agentsmith_consumer"
   compression: "snappy"  # 可选：none, snappy, gzip
+  balancer: "RangeAndCooperativeSticky" # 可选: RangeAndCooperativeSticky,RangeAndRoundRobin,StickyAndCooperativeSticky,RoundRobinAndCooperativeSticky,CooperativeSticky,Sticky,Range,RoundRobin
   # SASL 认证（可选）
   sasl:
     enable: true
@@ -160,6 +161,7 @@ kafka:
   topic: "processed_events"
   key: "user_id"  # 可选：指定消息key字段
   compression: "snappy"  # 可选：none, snappy, gzip
+  idempotent: true
   # SASL 认证（可选）
   sasl:
     enable: true
