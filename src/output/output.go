@@ -260,11 +260,8 @@ func (out *Output) cleanup() {
 
 // enhanceMessageWithProjectNodeSequence adds ProjectNodeSequence and output metadata to the message
 func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interface{}) map[string]interface{} {
-	// Create a copy of the original message to avoid modifying the original
-	enhancedMsg := make(map[string]interface{})
-	for k, v := range msg {
-		enhancedMsg[k] = v
-	}
+	// Create a deep copy of the original message to avoid concurrent map access issues
+	enhancedMsg := common.MapDeepCopy(msg)
 
 	// Add ProjectNodeSequence information
 	enhancedMsg["_hub_project_node_sequence"] = out.ProjectNodeSequence

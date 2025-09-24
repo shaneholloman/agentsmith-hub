@@ -72,9 +72,12 @@ func (rsm *RedisSampleManager) StoreSample(samplerName string, sample SampleData
 	// Simplified key structure: sample_data:samplerName:projectNodeSequence
 	key := fmt.Sprintf("%s%s:%s", RedisSampleKeyPrefix, samplerName, sample.ProjectNodeSequence)
 
+	// Create deep copy of data to avoid concurrent map access during JSON marshaling
+	dataCopy := MapDeepCopyAction(sample.Data)
+
 	// Create Redis sample data
 	redisSample := RedisSampleData{
-		Data:                sample.Data,
+		Data:                dataCopy,
 		Timestamp:           sample.Timestamp,
 		ProjectNodeSequence: sample.ProjectNodeSequence,
 		SamplerName:         samplerName,
@@ -91,7 +94,7 @@ func (rsm *RedisSampleManager) StoreSample(samplerName string, sample SampleData
 	hashInputBytes, _ := json.Marshal(struct {
 		Seq  string      `json:"seq"`
 		Data interface{} `json:"data"`
-	}{Seq: sample.ProjectNodeSequence, Data: sample.Data})
+	}{Seq: sample.ProjectNodeSequence, Data: dataCopy})
 	hashVal := xxhash.Sum64(hashInputBytes)
 	// Simplified hash key: sample_hash:samplerName:projectNodeSequence
 	hashKey := fmt.Sprintf("%s%s:%s", RedisSampleHashKey, samplerName, sample.ProjectNodeSequence)
@@ -381,9 +384,12 @@ func (rsm *RedisSampleManager) processBatch(batch []SampleData) {
 	// Process each key group
 	for key, samples := range samplesByKey {
 		for _, sample := range samples {
+			// Create deep copy of data to avoid concurrent map access during JSON marshaling
+			dataCopy := MapDeepCopyAction(sample.Data)
+
 			// Create Redis sample data
 			redisSample := RedisSampleData{
-				Data:                sample.Data,
+				Data:                dataCopy,
 				Timestamp:           sample.Timestamp,
 				ProjectNodeSequence: sample.ProjectNodeSequence,
 				SamplerName:         "unknown", // We need to pass sampler name
