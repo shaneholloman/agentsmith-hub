@@ -123,9 +123,18 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	atomic.AddUint64(&s.sampledCount, 1)
 
 	// Create sample data
+	// Create a deep copy to avoid concurrent map access issues
+	// The original data might be accessed concurrently by other goroutines
+	var dataCopy interface{}
+	if mapData, ok := data.(map[string]interface{}); ok {
+		dataCopy = MapDeepCopy(mapData)
+	} else {
+		// For non-map data, use the original data as it's safe
+		dataCopy = data
+	}
 	now := time.Now()
 	sample := SampleData{
-		Data:                data,
+		Data:                dataCopy,
 		Timestamp:           now,
 		ProjectNodeSequence: projectNodeSequence, // Keep original case for downstream
 	}
