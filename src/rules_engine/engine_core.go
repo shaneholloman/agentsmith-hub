@@ -425,13 +425,13 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 		rule := &r.Rules[ruleIndex] // Use pointer to avoid copying
 
 		// Execute all operations in the order specified by the Queue
-		ruleCheckRes, modifiedData := r.executeRuleOperations(rule, data, ruleCache)
+		ruleCheckRes, copied, modifiedData := r.executeRuleOperations(rule, data, ruleCache)
 
 		// Handle rule result based on ruleset type
 		if r.IsDetection {
 			// For detection rules, if rule passes, add to results
 			if ruleCheckRes {
-				if modifiedData == nil {
+				if !copied {
 					modifiedData = mapDeepCopyWithExtraCapacity(data, 1)
 				}
 				// Add rule info
@@ -479,16 +479,16 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 }
 
 // executeRuleOperations executes all operations in a rule according to the Queue order
-func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (bool, map[string]interface{}) {
+func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (bool, bool, map[string]interface{}) {
+	copied := false
+
 	if rule.Queue == nil || len(*rule.Queue) == 0 {
 		// No operations to execute
 		// For detection rules, empty rule means no match (false)
 		// For exclude rules, empty rule also means no match (false), allowing data to pass
-		return false, nil
+		return false, copied, nil
 	}
-
 	ruleResult := true
-	copied := false
 	// Execute operations in the exact order specified by the Queue
 	for _, op := range *rule.Queue {
 		var modifiedRes map[string]interface{}
@@ -499,7 +499,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if check fails, stop execution
 				if r.IsDetection {
-					return false, data
+					return false, copied, data
 				}
 				// For exclude rules, continue executing other operations
 			}
@@ -509,7 +509,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if check fails, stop execution
 				if r.IsDetection {
-					return false, data
+					return false, copied, data
 				}
 				// For exclude rules, continue executing other operations
 			}
@@ -519,7 +519,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if threshold fails, stop execution
 				if r.IsDetection {
-					return false, data
+					return false, copied, data
 				}
 				// For exclude rules, continue executing other operations
 			}
@@ -529,7 +529,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if iterator fails, stop execution
 				if r.IsDetection {
-					return false, data
+					return false, copied, data
 				}
 				// For exclude rules, continue executing other operations
 			}
@@ -553,7 +553,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 		}
 	}
 
-	return ruleResult, data
+	return ruleResult, copied, data
 }
 
 // executeCheckList executes a checklist operation
@@ -812,7 +812,7 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data m
 			if err == nil && ok {
 				if appendOp.FieldName == PluginArgFromRawSymbol {
 					if r, ok := res.(map[string]interface{}); ok {
-						res = common.MapDeepCopy(r)
+						res = r
 					} else {
 						logger.PluginError("Plugin result is not a map", "plugin", appendOp.Plugin.Name, "result", res)
 						res = nil
