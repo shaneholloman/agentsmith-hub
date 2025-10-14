@@ -873,8 +873,15 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		project.SetProject(req.ID, newProject)
 		project.DeleteProjectNew(req.ID)
 
-		// Projects don't have affected projects since they restart themselves
-		affectedProjects = []string{req.ID}
+		// Only restart project if it's a modification (OldContent exists)
+		// For new projects (OldContent empty), user needs to manually start
+		if req.OldContent != "" && strings.TrimSpace(req.OldContent) != "" {
+			affectedProjects = []string{req.ID}
+			logger.Info("Project modified, will restart automatically", "project", req.ID)
+		} else {
+			affectedProjects = []string{}
+			logger.Info("New project created, manual start required", "project", req.ID)
+		}
 
 	case "plugin":
 		// Create new component instance
