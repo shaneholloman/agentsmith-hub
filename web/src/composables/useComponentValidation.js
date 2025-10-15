@@ -17,8 +17,19 @@ export function useComponentValidation() {
   const showValidationPanel = ref(false)
   const verifyLoading = ref(false)
   
+  // Track dismissed error content to prevent re-showing same errors
+  const dismissedErrorHash = ref(null)
+  
   // Global message component
   const $message = inject('$message', window?.$toast)
+  
+  /**
+   * Generate hash for error content to compare changes
+   */
+  const getErrorHash = (errors, warnings) => {
+    const content = JSON.stringify({ errors, warnings })
+    return content
+  }
   
   /**
    * Clear validation state
@@ -27,6 +38,16 @@ export function useComponentValidation() {
     validationResult.value = { isValid: true, errors: [], warnings: [] }
     errorLines.value = []
     showValidationPanel.value = false
+    dismissedErrorHash.value = null
+  }
+  
+  /**
+   * Dismiss validation panel (called when user clicks X)
+   */
+  const dismissValidationPanel = () => {
+    showValidationPanel.value = false
+    // Remember current error content so we don't re-show it
+    dismissedErrorHash.value = getErrorHash(validationResult.value.errors, validationResult.value.warnings)
   }
   
   /**
@@ -86,7 +107,13 @@ export function useComponentValidation() {
       const lineNumber = extractLineNumber(err.message, componentType)
       return lineNumber !== null ? lineNumber : null
     }).filter(line => line !== null && line !== undefined)
-    showValidationPanel.value = true
+    
+    // Only show panel if error content has changed (or user hasn't dismissed it)
+    const currentErrorHash = getErrorHash(errors, warnings)
+    if (currentErrorHash !== dismissedErrorHash.value) {
+      showValidationPanel.value = true
+      dismissedErrorHash.value = null // Clear dismissed state since errors changed
+    }
     
     if (showMessages) {
       const errorCount = errors.length
@@ -155,7 +182,13 @@ export function useComponentValidation() {
       }
       
       errorLines.value = lineNumber ? [lineNumber] : []
-      showValidationPanel.value = true
+      
+      // Only show panel if error content has changed
+      const currentErrorHash = getErrorHash(validationResult.value.errors, validationResult.value.warnings)
+      if (currentErrorHash !== dismissedErrorHash.value) {
+        showValidationPanel.value = true
+        dismissedErrorHash.value = null
+      }
       
       return false
     } finally {
@@ -226,6 +259,7 @@ export function useComponentValidation() {
     showValidationPanel,
     verifyLoading,
     clearValidation,
+    dismissValidationPanel,
     validateRealtime,
     verifyComponent,
     validateBeforeSave,

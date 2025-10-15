@@ -144,7 +144,7 @@
       <div v-if="validationResult.errors.length > 0" class="validation-errors p-4 bg-red-50/60 border-l-4 border-red-400/70 text-red-800 rounded-t-xl backdrop-blur-sm">
         <div class="flex justify-between items-start mb-3">
           <h3 class="font-semibold text-sm text-red-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : (isProject ? 'Project Validation' : 'Validation'))) }} Errors</h3>
-          <button @click="showValidationPanel = false" class="text-red-400 hover:text-red-600 ml-2 transition-colors duration-150">
+          <button @click="dismissValidationPanel()" class="text-red-400 hover:text-red-600 ml-2 transition-colors duration-150">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
@@ -165,7 +165,7 @@
            :class="{ 'rounded-t-xl': validationResult.errors.length === 0, 'rounded-b-xl': true }">
         <div v-if="validationResult.errors.length === 0" class="flex justify-between items-start mb-3">
           <h3 class="font-semibold text-sm text-amber-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : (isProject ? 'Project Validation' : 'Validation'))) }} Warnings</h3>
-          <button @click="showValidationPanel = false" class="text-amber-400 hover:text-amber-600 ml-2 transition-colors duration-150">
+          <button @click="dismissValidationPanel()" class="text-amber-400 hover:text-amber-600 ml-2 transition-colors duration-150">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
@@ -646,6 +646,7 @@ const {
   showValidationPanel,
   verifyLoading,
   clearValidation,
+  dismissValidationPanel,
   validateRealtime,
   verifyComponent,
   validateBeforeSave,
