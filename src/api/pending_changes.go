@@ -857,6 +857,10 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		affectedProjects = project.GetAffectedProjects("ruleset", req.ID)
 
 	case "project":
+		// Save old project status before creating new instance
+		oldProject, oldExists := project.GetProject(req.ID)
+		wasRunning := oldExists && oldProject.Status == common.StatusRunning
+
 		// Create new component instance
 		var newProject *project.Project
 		var err error
@@ -867,6 +871,11 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to create project: %w", err)
+		}
+
+		// If old project was running, set new project to stopping to avoid UI showing stopped/error
+		if wasRunning {
+			newProject.SetProjectStatus(common.StatusStopping, nil)
 		}
 
 		// Replace in global registry using safe accessors
@@ -1017,10 +1026,10 @@ func ApplySingleChange(c echo.Context) error {
 
 	// Track projects that will actually be restarted
 	projectsToRestart := []string{}
-	
+
 	if len(affectedProjects) > 0 {
 		logger.Info("Restarting affected projects asynchronously", "count", len(affectedProjects))
-		
+
 		// First, check which projects will actually be restarted (based on user intention)
 		for _, id := range affectedProjects {
 			if _, ok := project.GetProject(id); ok {
@@ -1029,13 +1038,13 @@ func ApplySingleChange(c echo.Context) error {
 					logger.Warn("Failed to get user intention for project, defaulting to restart", "project_id", id, "error", err)
 					userWantsRunning = true // Default to restart on error for backward compatibility
 				}
-				
+
 				if userWantsRunning {
 					projectsToRestart = append(projectsToRestart, id)
 				}
 			}
 		}
-		
+
 		// Then restart them asynchronously
 		go func() {
 			for _, id := range projectsToRestart {
@@ -1049,13 +1058,13 @@ func ApplySingleChange(c echo.Context) error {
 		}()
 
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"message":            "Change applied successfully, projects are restarting asynchronously",
+			"message":             "Change applied successfully, projects are restarting asynchronously",
 			"projects_to_restart": projectsToRestart,
 		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message": "Change applied successfully",
+		"message":             "Change applied successfully",
 		"projects_to_restart": []string{},
 	})
 }
