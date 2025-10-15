@@ -144,11 +144,19 @@ func (p *ElasticsearchProducer) run() {
 			return
 		case msg, ok := <-p.MsgChan:
 			if !ok {
-				// Channel is closed, flush any remaining batch
-				if len(batch) > 0 {
-					p.flush(batch)
+				// Channel is closed, check if we should still flush
+				// First check if stop signal was received
+				select {
+				case <-p.stopChan:
+					// Stop signal received, skip flushing and return immediately
+					return
+				default:
+					// No stop signal, flush remaining batch
+					if len(batch) > 0 {
+						p.flush(batch)
+					}
+					return
 				}
-				return
 			}
 			batch = append(batch, msg)
 			if len(batch) >= p.batchSize {
@@ -196,8 +204,16 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 
 	// Try to send with retries and timeout control
 	for i := 0; i <= p.maxRetries; i++ {
-		// Create context with timeout for each retry
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Check if we should stop before each retry
+		select {
+		case <-p.stopChan:
+			// Stop signal received, abort sending
+			return
+		default:
+		}
+
+		// Create context with shorter timeout for faster shutdown (reduced from 5s to 2s)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 
 		// Use context for bulk request
 		res, err := p.Client.Bulk(bytes.NewReader(buf.Bytes()), p.Client.Bulk.WithContext(ctx))
@@ -209,7 +225,12 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 				fmt.Printf("Failed to send batch to ES after %d retries: %v\n", p.maxRetries, err)
 				return
 			}
-			time.Sleep(p.retryDelay)
+			// Check stop signal before retry delay
+			select {
+			case <-p.stopChan:
+				return
+			case <-time.After(p.retryDelay):
+			}
 			continue
 		}
 		defer res.Body.Close()
@@ -219,7 +240,12 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 				fmt.Printf("ES returned error after %d retries: %s\n", p.maxRetries, res.String())
 				return
 			}
-			time.Sleep(p.retryDelay)
+			// Check stop signal before retry delay
+			select {
+			case <-p.stopChan:
+				return
+			case <-time.After(p.retryDelay):
+			}
 			continue
 		}
 

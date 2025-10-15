@@ -804,7 +804,7 @@ func (out *Output) Stop() error {
 	select {
 	case <-waitDone:
 		logger.Info("Output stopped gracefully", "id", out.Id)
-	case <-time.After(3 * time.Second): // Further reduced timeout
+	case <-time.After(10 * time.Second): // Increased timeout to allow for network operations and retries
 		logger.Warn("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
 
 		// Try to get more information about pending messages for debugging
