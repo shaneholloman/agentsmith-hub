@@ -39,7 +39,7 @@ func WriteErrorLogToRedis(entry ErrorLogEntry) error {
 
 	// Use LPUSH to add to the front of the list (newest first)
 	// Keep only the last 10000 entries per node
-	if err := RedisLPush(key, string(jsonData), 600000); err != nil {
+	if err := RedisLPush(key, string(jsonData), 10000); err != nil {
 		return fmt.Errorf("failed to push error log to Redis: %w", err)
 	}
 
@@ -128,33 +128,65 @@ func GetErrorLogsFromRedisWithFilter(nodeID string, source string, startTime, en
 		return nil, 0, fmt.Errorf("Redis client not initialized")
 	}
 
+	// Set reasonable limits to prevent memory spikes
+	const maxNodesToProcess = 50
+	const maxEntriesPerNode = 500
+	const maxTotalEntries = 2000
+
+	// Default last 1 hour window if both zero
+	if startTime.IsZero() && endTime.IsZero() {
+		endTime = time.Now()
+		startTime = endTime.Add(-1 * time.Hour)
+	}
+
 	var allEntries []ErrorLogEntry
 	var filteredEntries []ErrorLogEntry
 
 	if nodeID == "" || nodeID == "all" {
-		// Get logs from all nodes
+		// Get logs from all nodes with limited entries per node
 		pattern := "cluster:error_logs:*"
 		keys, err := RedisKeys(pattern)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to get error log keys: %w", err)
 		}
 
+		// Limit number of nodes to process
+		if len(keys) > maxNodesToProcess {
+			keys = keys[:maxNodesToProcess]
+		}
+
+		// Pre-allocate slice with estimated capacity
+		estimatedCapacity := len(keys) * maxEntriesPerNode
+		if estimatedCapacity > maxTotalEntries {
+			estimatedCapacity = maxTotalEntries
+		}
+		allEntries = make([]ErrorLogEntry, 0, estimatedCapacity)
+
 		for _, key := range keys {
-			entries, err := getErrorLogsFromKey(key, -1, 0) // Get all entries from each node
+			// Get limited entries from each node instead of all entries
+			entries, err := getErrorLogsFromKey(key, maxEntriesPerNode, 0)
 			if err != nil {
 				continue // Skip this node if error
 			}
 			allEntries = append(allEntries, entries...)
+
+			// Stop if we've collected enough entries
+			if len(allEntries) >= maxTotalEntries {
+				break
+			}
 		}
 	} else {
-		// Get logs from specific node
+		// Get logs from specific node with limit
 		key := fmt.Sprintf("cluster:error_logs:%s", nodeID)
-		entries, err := getErrorLogsFromKey(key, -1, 0)
+		entries, err := getErrorLogsFromKey(key, maxTotalEntries, 0)
 		if err != nil {
 			return nil, 0, err
 		}
 		allEntries = entries
 	}
+
+	// Pre-allocate filtered slice with estimated capacity
+	filteredEntries = make([]ErrorLogEntry, 0, len(allEntries))
 
 	// Apply filters
 	for _, entry := range allEntries {
@@ -209,8 +241,6 @@ func GetErrorLogsFromRedisWithFilter(nodeID string, source string, startTime, en
 
 // getErrorLogsFromKey retrieves error logs from a specific Redis key
 func getErrorLogsFromKey(key string, limit int, offset int) ([]ErrorLogEntry, error) {
-	var entries []ErrorLogEntry
-
 	// Calculate Redis range parameters
 	start := int64(offset)
 	stop := int64(-1) // -1 means get all from start
@@ -223,6 +253,9 @@ func getErrorLogsFromKey(key string, limit int, offset int) ([]ErrorLogEntry, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to get error logs from Redis: %w", err)
 	}
+
+	// Pre-allocate slice with exact capacity to avoid reallocations
+	entries := make([]ErrorLogEntry, 0, len(jsonEntries))
 
 	// Parse JSON entries
 	for _, jsonEntry := range jsonEntries {

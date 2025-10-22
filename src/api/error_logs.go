@@ -88,8 +88,9 @@ func getUnifiedErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, int, error) {
 			Line:        log.Line,
 		}
 
-		// Convert details to context string if available
+		// Convert details to context string if available (avoid re-marshaling)
 		if len(log.Details) > 0 {
+			// Use the already marshaled details from Redis to avoid re-serialization
 			if contextBytes, err := json.Marshal(log.Details); err == nil {
 				apiLog.Context = string(contextBytes)
 			}
@@ -120,6 +121,14 @@ func getErrorLogs(c echo.Context) error {
 		if parsed, err := time.Parse(time.RFC3339, endTime); err == nil {
 			filter.EndTime = parsed
 		}
+	}
+
+	// Default to last 1 hour if no time filters provided
+	if filter.StartTime.IsZero() && filter.EndTime.IsZero() {
+		end := time.Now()
+		start := end.Add(-1 * time.Hour)
+		filter.StartTime = start
+		filter.EndTime = end
 	}
 
 	// Parse pagination
