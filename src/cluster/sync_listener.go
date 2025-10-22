@@ -36,13 +36,39 @@ func InitSyncListener(nodeID string) {
 		nodeID:           nodeID,
 		stopChan:         make(chan struct{}),
 		currentVersion:   0,  // Default to 0 for new followers
-		executionFlagTTL: 75, // 75 seconds TTL for execution flags
+		executionFlagTTL: 30, // 30 seconds TTL for execution flags (reduced from 75s for faster recovery)
 		baseVersion:      "0",
 	}
 }
 
 func (sl *SyncListener) GetCurrentVersion() string {
+	sl.mu.RLock()
+	defer sl.mu.RUnlock()
+
 	return fmt.Sprintf("%s.%d", sl.baseVersion, sl.currentVersion)
+}
+
+// getCurrentVersionUnsafe returns version string without locking (must be called with lock held)
+func (sl *SyncListener) getCurrentVersionUnsafe() string {
+	return fmt.Sprintf("%s.%d", sl.baseVersion, sl.currentVersion)
+}
+
+// ResetForFullResync resets follower state to trigger full resync
+// Called when follower is kicked out by leader due to slow sync
+func (sl *SyncListener) ResetForFullResync() {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+
+	logger.Info("Resetting follower for full resync",
+		"old_version", sl.getCurrentVersionUnsafe())
+
+	// Clear all local components and projects
+	sl.clearAllLocalComponents()
+
+	// Reset to version 0 (keep same baseVersion - leader will send the correct one)
+	sl.currentVersion = 0
+
+	logger.Info("Follower reset completed", "new_version", sl.getCurrentVersionUnsafe())
 }
 
 // Start starts the sync listener (follower only)
@@ -150,13 +176,13 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	defer sl.mu.Unlock()
 
 	// Set execution flag to indicate this follower is executing instructions
-	if err := sl.SetFollowerExecutionFlag(common.GetNodeID()); err != nil {
+	if err := sl.SetFollowerExecutionFlag(sl.nodeID); err != nil {
 		logger.Error("Failed to set execution flag", "error", err)
 	}
 
 	// Ensure flag is cleared when done (with defer for safety)
 	defer func() {
-		if err := sl.ClearFollowerExecutionFlag(common.GetNodeID()); err != nil {
+		if err := sl.ClearFollowerExecutionFlag(sl.nodeID); err != nil {
 			logger.Error("Failed to clear execution flag", "error", err)
 		}
 	}()
@@ -173,16 +199,21 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 
 	// Check if session has changed (leader restart) or if this is a new follower
 	if sl.baseVersion != leaderParts[0] {
-		logger.Info("Follower needs full sync", "from", sl.GetCurrentVersion(), "to", toVersion)
+		logger.Info("Follower needs full sync due to leader session change",
+			"from", sl.getCurrentVersionUnsafe(),
+			"to", toVersion,
+			"old_base", sl.baseVersion,
+			"new_base", leaderParts[0])
 
-		// Clear all local components and projects
-		if err := sl.clearAllLocalComponents(); err != nil {
-			logger.Error("Failed to clear local components", "error", err)
-			return fmt.Errorf("failed to clear local components: %w", err)
-		}
+		// Clear all local components and projects (never fails)
+		sl.clearAllLocalComponents()
 
+		// Update baseVersion immediately after clearing to prevent repeated clearing
 		// Start from version 0, so we'll sync from version 1 to endVersion
+		sl.baseVersion = leaderParts[0]
 		sl.currentVersion = 0
+
+		logger.Info("Follower state reset for full resync", "new_version", sl.getCurrentVersionUnsafe())
 	}
 
 	// Track instruction execution details
@@ -196,7 +227,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	// Instructions are numbered from 1 onwards (version 0 is temporary state)
 	for version := sl.currentVersion + 1; version <= endVersion; version++ {
 		// Refresh execution flag during long operations
-		if err := sl.RefreshFollowerExecutionFlag(common.GetNodeID()); err != nil {
+		if err := sl.SetFollowerExecutionFlag(sl.nodeID); err != nil {
 			logger.Warn("Failed to refresh execution flag", "error", err)
 		}
 
@@ -211,8 +242,8 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		if err != nil {
 			// Record missing instruction - this could indicate a problem
 			missingInstructions = append(missingInstructions, version)
-			logger.Warn("Instruction not found in Redis", 
-				"version", version, 
+			logger.Warn("Instruction not found in Redis",
+				"version", version,
 				"error", err,
 				"this_may_cause_inconsistency", true)
 			continue
@@ -229,24 +260,16 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 			compacted++
 		}
 	}
-	
-	// Check if too many instructions are missing
-	totalInstructionsExpected := endVersion - sl.currentVersion
-	missingCount := int64(len(missingInstructions))
-	if missingCount > 0 {
-		missingRatio := float64(missingCount) / float64(totalInstructionsExpected)
-		logger.Warn("Some instructions are missing during sync",
-			"missing_count", missingCount,
+
+	// Log missing instructions if any
+	if len(missingInstructions) > 0 {
+		totalInstructionsExpected := endVersion - sl.currentVersion
+		missingRatio := float64(len(missingInstructions)) / float64(totalInstructionsExpected)
+		logger.Warn("Some instructions are missing during sync, will trigger full resync",
+			"missing_count", len(missingInstructions),
 			"total_expected", totalInstructionsExpected,
 			"missing_ratio", fmt.Sprintf("%.2f%%", missingRatio*100),
 			"missing_versions", missingInstructions)
-		
-		// If more than 10% instructions are missing, this is a serious issue
-		if missingRatio > 0.1 {
-			logger.Error("High ratio of missing instructions detected - cluster state may be inconsistent",
-				"missing_ratio", fmt.Sprintf("%.2f%%", missingRatio*100),
-				"recommendation", "consider full resync or manual intervention")
-		}
 	}
 	slices.SortStableFunc(instructions, func(a, b Instruction) int {
 		if a.ComponentType == "project" && b.ComponentType != "project" {
@@ -262,7 +285,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		if version == 0 {
 			continue
 		}
-		// Apply instruction - execute once regardless of success/failure
+		// Apply instruction - no retry, fail fast
 		if err := sl.applyInstruction(version); err != nil {
 			logger.Error("Failed to apply instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation, "error", err)
 			failedInstructions = append(failedInstructions, fmt.Sprintf("v%d: %s %s %s (failed: %v)", version, instruction.Operation, instruction.ComponentType, instruction.ComponentName, err))
@@ -274,14 +297,36 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		}
 	}
 
-	sl.currentVersion = endVersion
-	sl.baseVersion = leaderParts[0]
+	// Save old version for logging
+	oldVersion := sl.getCurrentVersionUnsafe()
+
+	// Only update version if all instructions succeeded
+	if len(failedInstructions) == 0 && len(missingInstructions) == 0 {
+		sl.currentVersion = endVersion
+		sl.baseVersion = leaderParts[0]
+		logger.Info("All instructions applied successfully, version updated", "new_version", sl.getCurrentVersionUnsafe())
+	} else {
+		// If any instruction failed, clear all components and start from scratch
+		logger.Error("Some instructions failed, clearing all components for full resync",
+			"failed_count", len(failedInstructions),
+			"missing_count", len(missingInstructions),
+			"current_version", sl.getCurrentVersionUnsafe(),
+			"target_version", toVersion)
+
+		// Clear all local components and projects (never fails)
+		sl.clearAllLocalComponents()
+
+		// Reset to version 0 to trigger full resync on next attempt
+		sl.currentVersion = 0
+		sl.baseVersion = leaderParts[0]
+		logger.Info("Follower reset to version 0, will perform full resync on next attempt")
+	}
 
 	// Log final sync result
 	if len(failedInstructions) > 0 || len(missingInstructions) > 0 {
 		logger.Error("Instructions synced with some failures or missing instructions",
-			"from", sl.GetCurrentVersion(),
-			"to", toVersion,
+			"current_version", sl.getCurrentVersionUnsafe(),
+			"target_version", toVersion,
 			"compacted", compacted,
 			"processed", len(processedInstructions),
 			"failed", len(failedInstructions),
@@ -289,10 +334,11 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 			"successful_instructions", strings.Join(processedInstructions, "; "),
 			"failed_instructions", strings.Join(failedInstructions, "; "),
 			"missing_versions", missingInstructions)
+		return fmt.Errorf("sync incomplete: %d failed, %d missing instructions", len(failedInstructions), len(missingInstructions))
 	} else {
 		logger.Info("Instructions synced successfully",
-			"from", sl.GetCurrentVersion(),
-			"to", toVersion,
+			"from_version", oldVersion,
+			"to_version", sl.getCurrentVersionUnsafe(),
 			"count", len(processedInstructions),
 			"compacted", compacted,
 			"instructions", strings.Join(processedInstructions, "; "))
@@ -307,7 +353,7 @@ func (sl *SyncListener) ClearFollowerExecutionFlag(nodeID string) error {
 	return common.RedisDel(key)
 }
 
-// SetFollowerExecutionFlag sets a flag indicating follower is executing instructions
+// SetFollowerExecutionFlag sets/refreshes a flag indicating follower is executing instructions
 func (sl *SyncListener) SetFollowerExecutionFlag(nodeID string) error {
 	key := fmt.Sprintf("cluster:execution_flag:%s", nodeID)
 	_, err := common.RedisSet(key, "executing", int(sl.executionFlagTTL))
@@ -315,13 +361,6 @@ func (sl *SyncListener) SetFollowerExecutionFlag(nodeID string) error {
 		return fmt.Errorf("failed to set execution flag: %w", err)
 	}
 	return nil
-}
-
-// RefreshFollowerExecutionFlag refreshes the TTL of execution flag
-func (sl *SyncListener) RefreshFollowerExecutionFlag(nodeID string) error {
-	key := fmt.Sprintf("cluster:execution_flag:%s", nodeID)
-	_, err := common.RedisSet(key, "executing", int(sl.executionFlagTTL))
-	return err
 }
 
 // applyInstruction applies a single instruction
@@ -409,10 +448,11 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 }
 
 // clearAllLocalComponents clears all local components and projects when leader session changes
-func (sl *SyncListener) clearAllLocalComponents() error {
-	logger.Info("Clearing all local components and projects due to leader session change")
+// This function never fails - it will try best effort to clean everything
+func (sl *SyncListener) clearAllLocalComponents() {
+	logger.Info("Clearing all local components and projects for full resync")
 
-	// Stop and close all running projects first
+	// Step 1: Stop all running projects first
 	// Collect running projects first to avoid deadlock
 	var runningProjects []*project.Project
 	project.ForEachProject(func(projectName string, proj *project.Project) bool {
@@ -422,19 +462,57 @@ func (sl *SyncListener) clearAllLocalComponents() error {
 		return true
 	})
 
-	// Stop projects without holding locks
+	// Stop projects without holding locks - continue even if some fail
 	for _, proj := range runningProjects {
-		logger.Info("Stopping project due to session change", "project", proj.Id)
+		logger.Info("Stopping project for cleanup", "project", proj.Id)
 		if err := proj.Stop(true); err != nil {
-			logger.Warn("Failed to stop project during session change", "project", proj.Id, "error", err)
+			logger.Warn("Failed to stop project during cleanup, continuing anyway", "project", proj.Id, "error", err)
 		}
 	}
 
-	// Clear global component config maps
+	// Step 2: Delete all component instances (to match state of newly started follower)
+	// Get all component IDs before deletion
+	var projectIDs, inputIDs, outputIDs, rulesetIDs []string
+
+	project.ForEachProject(func(projectName string, _ *project.Project) bool {
+		projectIDs = append(projectIDs, projectName)
+		return true
+	})
+
+	for id := range project.GetAllInputs() {
+		inputIDs = append(inputIDs, id)
+	}
+
+	for id := range project.GetAllOutputs() {
+		outputIDs = append(outputIDs, id)
+	}
+
+	for id := range project.GetAllRulesets() {
+		rulesetIDs = append(rulesetIDs, id)
+	}
+
+	// Delete all instances - these operations don't fail
+	for _, id := range projectIDs {
+		project.DeleteProject(id)
+	}
+	for _, id := range inputIDs {
+		project.DeleteInput(id)
+	}
+	for _, id := range outputIDs {
+		project.DeleteOutput(id)
+	}
+	for _, id := range rulesetIDs {
+		project.DeleteRuleset(id)
+	}
+
+	// Step 3: Clear global component raw config maps
 	common.ClearAllRawConfigsForAllTypes()
 
-	logger.Info("Successfully cleared and released all local components and projects")
-	return nil
+	logger.Info("Successfully cleared all components and projects",
+		"projects_deleted", len(projectIDs),
+		"inputs_deleted", len(inputIDs),
+		"outputs_deleted", len(outputIDs),
+		"rulesets_deleted", len(rulesetIDs))
 }
 
 // createComponentInstance creates actual component instances from configuration

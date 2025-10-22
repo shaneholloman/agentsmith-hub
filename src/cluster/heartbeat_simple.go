@@ -5,8 +5,8 @@ import (
 	"AgentSmith-HUB/logger"
 	"context"
 	"encoding/json"
-	"strconv"
-	"strings"
+	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -37,9 +37,9 @@ var GlobalHeartbeatManager *HeartbeatManager
 // InitHeartbeatManager initializes the heartbeat manager
 func InitHeartbeatManager(nodeID string, isLeader bool) {
 	// Calculate randomized heartbeat interval for followers
-	// Base interval: 5 seconds, random jitter: ±2 seconds (3-7 seconds total)
+	// Base interval: 5 seconds, random jitter: 0-4 seconds (5-9 seconds total)
 	baseInterval := 5 * time.Second
-	jitter := time.Duration((time.Now().UnixNano() % 4000)) * time.Millisecond // 0-4 seconds
+	jitter := time.Duration(rand.Int63n(4000)) * time.Millisecond // Use proper random generator
 	heartbeatInterval := baseInterval + jitter
 
 	GlobalHeartbeatManager = &HeartbeatManager{
@@ -128,6 +128,36 @@ func (hm *HeartbeatManager) startFollowerHeartbeat() {
 func (hm *HeartbeatManager) sendHeartbeat() {
 	if common.IsCurrentNodeLeader() {
 		return
+	}
+
+	// Check if leader kicked us out and requires full resync
+	resyncFlagKey := fmt.Sprintf("cluster:resync_required:%s", hm.nodeID)
+	if resyncFlag, err := common.RedisGet(resyncFlagKey); err == nil && resyncFlag != "" {
+		logger.Warn("Follower was kicked out by leader, resetting for full resync",
+			"reason", resyncFlag,
+			"node_id", hm.nodeID)
+
+		// Clear the resync flag first (with defer to ensure it's always cleared)
+		defer func() {
+			if err := common.RedisDel(resyncFlagKey); err != nil {
+				logger.Warn("Failed to clear resync flag", "error", err)
+			}
+		}()
+
+		// Reset follower to version 0 to trigger full resync (with panic recovery)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic during follower reset", "panic", r)
+				}
+			}()
+
+			if GlobalSyncListener != nil {
+				GlobalSyncListener.ResetForFullResync()
+			}
+		}()
+
+		logger.Info("Follower reset completed, will perform full resync on next heartbeat")
 	}
 
 	currentVersion := "0.0"
@@ -296,25 +326,13 @@ func (hm *HeartbeatManager) checkVersionSync(heartbeat HeartbeatData) {
 		return
 	}
 
-	leaderVersion := GlobalInstructionManager.GetCurrentVersion()
-	// Skip sync only if leader is actually in compaction mode (currentVersion == 0)
-	// Don't skip just because version ends with .0, as that could be a valid final state
-	if leaderVersion != "" && strings.Contains(leaderVersion, ".") {
-		parts := strings.Split(leaderVersion, ".")
-		if len(parts) == 2 {
-			if versionNum, err := strconv.ParseInt(parts[1], 10, 64); err == nil && versionNum == 0 {
-				// Check if this is actually compaction mode by getting the raw version
-				if GlobalInstructionManager != nil {
-					rawVersion := GlobalInstructionManager.currentVersion
-					if rawVersion == 0 {
-						logger.Debug("Leader in compaction mode, skipping sync", "leader_version", leaderVersion)
-						return
-					}
-				}
-			}
-		}
+	// Skip sync if leader is in compaction mode
+	if GlobalInstructionManager.IsCompacting() {
+		logger.Debug("Leader in compaction mode, skipping sync", "follower_node", heartbeat.NodeID)
+		return
 	}
 
+	leaderVersion := GlobalInstructionManager.GetCurrentVersion()
 	if heartbeat.Version != leaderVersion {
 		logger.Debug("Version mismatch detected",
 			"node", heartbeat.NodeID,
