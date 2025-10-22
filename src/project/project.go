@@ -115,13 +115,25 @@ func collectAllComponentStats() []common.DailyStatsData {
 func GetAffectedProjects(componentType string, componentID string) []string {
 	affectedProjects := make(map[string]struct{})
 
+	// Helper function to check user intention with fallback to actual status
+	checkShouldRestart := func(projectID string, p *Project) bool {
+		userWantsRunning, err := common.GetProjectUserIntention(projectID)
+		if err != nil {
+			// Fallback: if we can't get user intention, check actual status
+			// This handles Redis failures or other edge cases
+			logger.Warn("Failed to get user intention, using actual status as fallback", 
+				"project", projectID, "error", err, "actual_status", p.Status)
+			return p.Status == common.StatusRunning
+		}
+		return userWantsRunning
+	}
+
 	switch componentType {
 	case "input":
 		// Find all projects using this input
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("INPUT", componentID) {
-				// Check if user wants this project to be running
-				if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
+				if checkShouldRestart(projectID, p) {
 					affectedProjects[projectID] = struct{}{}
 				}
 			}
@@ -131,8 +143,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// Find all projects using this output
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("OUTPUT", componentID) {
-				// Check if user wants this project to be running
-				if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
+				if checkShouldRestart(projectID, p) {
 					affectedProjects[projectID] = struct{}{}
 				}
 			}
@@ -142,17 +153,113 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// Find all projects using this ruleset
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("RULESET", componentID) {
-				// Check if user wants this project to be running
-				if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
+				if checkShouldRestart(projectID, p) {
 					affectedProjects[projectID] = struct{}{}
 				}
 			}
 			return true
 		})
+	case "plugin":
+		// For plugins, we need to find:
+		// 1. Which rulesets use this plugin
+		// 2. Which projects use those rulesets
+		affectedRulesets := make(map[string]bool)
+		
+		// Find all rulesets that use this plugin
+		ForEachRuleset(func(rulesetID string, ruleset *rules_engine.Ruleset) bool {
+			if ruleset == nil {
+				return true
+			}
+			
+			// Check if ruleset uses this plugin by examining rules
+			// Plugins can be used in various rule operations (check, append, modify, plugin)
+			for _, rule := range ruleset.Rules {
+				pluginUsed := false
+				
+				// Check in CheckMap (check nodes)
+				for _, checkNode := range rule.CheckMap {
+					if checkNode.Plugin != nil && checkNode.Plugin.Name == componentID {
+						pluginUsed = true
+						break
+					}
+				}
+				
+				// Check in ChecklistMap (checklist nodes)
+				if !pluginUsed {
+					for _, checklist := range rule.ChecklistMap {
+						for _, checkNode := range checklist.CheckNodes {
+							if checkNode.Plugin != nil && checkNode.Plugin.Name == componentID {
+								pluginUsed = true
+								break
+							}
+						}
+						if pluginUsed {
+							break
+						}
+					}
+				}
+				
+				// Check in AppendsMap (append operations)
+				if !pluginUsed {
+					for _, appendOp := range rule.AppendsMap {
+						if appendOp.Plugin != nil && appendOp.Plugin.Name == componentID {
+							pluginUsed = true
+							break
+						}
+					}
+				}
+				
+				// Check in ModifyMap (modify operations)
+				if !pluginUsed {
+					for _, modifyOp := range rule.ModifyMap {
+						if modifyOp.Plugin != nil && modifyOp.Plugin.Name == componentID {
+							pluginUsed = true
+							break
+						}
+					}
+				}
+				
+				// Check in PluginMap (plugin operations)
+				if !pluginUsed {
+					for _, pluginOp := range rule.PluginMap {
+						if pluginOp.Plugin != nil && pluginOp.Plugin.Name == componentID {
+							pluginUsed = true
+							break
+						}
+					}
+				}
+				
+				if pluginUsed {
+					affectedRulesets[rulesetID] = true
+					break // No need to check other rules in this ruleset
+				}
+			}
+			return true
+		})
+		
+		// Find all projects using the affected rulesets
+		for rulesetID := range affectedRulesets {
+			ForEachProject(func(projectID string, p *Project) bool {
+				if p.CheckExist("RULESET", rulesetID) {
+					if checkShouldRestart(projectID, p) {
+						affectedProjects[projectID] = struct{}{}
+					}
+				}
+				return true
+			})
+		}
+		
+		logger.Info("Plugin change affects rulesets and projects", 
+			"plugin", componentID, 
+			"affected_rulesets", len(affectedRulesets),
+			"affected_projects", len(affectedProjects))
+			
 	case "project":
 		// For project changes, check if user wants this project to be running
-		if userWantsRunning, err := common.GetProjectUserIntention(componentID); err == nil && userWantsRunning {
-			affectedProjects[componentID] = struct{}{}
+		if p, exists := GetProject(componentID); exists {
+			if checkShouldRestart(componentID, p) {
+				affectedProjects[componentID] = struct{}{}
+			}
 		}
 	}
 
