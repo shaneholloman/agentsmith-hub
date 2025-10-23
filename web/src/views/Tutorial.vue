@@ -632,11 +632,13 @@ onBeforeUnmount(() => {
   transition: all 0.3s ease;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .document-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   background: white;
   min-height: 0;
   padding-bottom: 48px; /* leave space for fixed status bar */
@@ -735,14 +737,15 @@ onBeforeUnmount(() => {
 
 /* GitHub Markdown 样式增强 */
 :deep(.markdown-body) {
-  max-width: none;
-  margin: 0;
-  padding: 24px 40px 32px 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 60px 32px 40px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
   color: #24292f;
   background-color: #ffffff;
   box-sizing: border-box;
+  width: 100%;
 }
 
 /* 自定义标题样式 */
