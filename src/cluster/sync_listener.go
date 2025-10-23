@@ -71,66 +71,63 @@ func (sl *SyncListener) ResetForFullResync() {
 	logger.Info("Follower reset completed", "new_version", sl.getCurrentVersionUnsafe())
 }
 
-// waitForLeaderReady waits for leader to complete compaction before starting sync
-func (sl *SyncListener) waitForLeaderReady() {
-	logger.Info("Follower waiting for leader to be ready", "node_id", sl.nodeID)
-
-	maxWaitTime := 5 * time.Minute // Maximum wait time
-	checkInterval := 2 * time.Second
-	deadline := time.Now().Add(maxWaitTime)
-
-	for time.Now().Before(deadline) {
-		// Check if leader version is 0 (indicating compaction in progress)
-		leaderVersion, err := sl.getLeaderVersion()
-		if err != nil {
-			logger.Warn("Failed to get leader version, retrying", "error", err)
-			time.Sleep(checkInterval)
-			continue
-		}
-
-		// Parse leader version to check if it's in compaction mode
-		parts := strings.Split(leaderVersion, ".")
-		if len(parts) == 2 {
-			if versionNum, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-				if versionNum > 0 {
-					// Leader is ready (version > 0)
-					logger.Info("Leader is ready, follower can start syncing",
-						"node_id", sl.nodeID,
-						"leader_version", leaderVersion)
-					return
-				}
-			}
-		}
-
-		logger.Debug("Leader still in compaction mode, waiting",
-			"node_id", sl.nodeID,
-			"leader_version", leaderVersion)
-		time.Sleep(checkInterval)
-	}
-
-	logger.Warn("Timeout waiting for leader to be ready, proceeding anyway",
-		"node_id", sl.nodeID,
-		"max_wait_time", maxWaitTime)
-}
-
-// getLeaderVersion gets the current leader version from Redis
-func (sl *SyncListener) getLeaderVersion() (string, error) {
-	version, err := common.RedisGet("cluster:leader_version")
-	if err != nil {
-		return "", fmt.Errorf("failed to get leader version from Redis: %w", err)
-	}
-	return version, nil
-}
-
 // Start starts the sync listener (follower only)
 func (sl *SyncListener) Start() {
 	if common.IsCurrentNodeLeader() {
 		return
 	}
 
-	// Wait for leader to complete compaction if it's in progress
-	go sl.waitForLeaderReady()
 	go sl.listenSyncCommands()
+}
+
+// waitForLeaderReadyIfNeeded waits if leader is in compaction mode (version 0)
+func (sl *SyncListener) waitForLeaderReadyIfNeeded(targetVersion string) error {
+	// Parse target version to check if it's 0
+	parts := strings.Split(targetVersion, ".")
+	if len(parts) != 2 {
+		return nil // Invalid format, let SyncInstructions handle it
+	}
+
+	versionNum, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || versionNum > 0 {
+		return nil // Version > 0 or parse error, proceed normally
+	}
+
+	// Leader is in compaction mode (version = 0), wait for it to complete
+	logger.Info("Leader is in compaction mode, waiting for completion",
+		"node_id", sl.nodeID,
+		"leader_version", targetVersion)
+
+	maxWaitTime := 5 * time.Minute // Maximum wait time
+	checkInterval := 1 * time.Second
+	deadline := time.Now().Add(maxWaitTime)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(checkInterval)
+
+		// Re-read leader version
+		leaderVersion, err := common.RedisGet("cluster:leader_version")
+		if err != nil {
+			logger.Warn("Failed to get leader version while waiting", "error", err)
+			continue
+		}
+
+		// Check if compaction completed
+		parts := strings.Split(leaderVersion, ".")
+		if len(parts) == 2 {
+			if versionNum, err := strconv.ParseInt(parts[1], 10, 64); err == nil && versionNum > 0 {
+				logger.Info("Leader compaction completed, proceeding with sync",
+					"node_id", sl.nodeID,
+					"new_leader_version", leaderVersion)
+				return nil
+			}
+		}
+	}
+
+	logger.Warn("Timeout waiting for leader compaction to complete, will try sync anyway",
+		"node_id", sl.nodeID,
+		"max_wait_time", maxWaitTime)
+	return nil
 }
 
 // listenSyncCommands listens for sync commands from leader
@@ -228,6 +225,11 @@ func (sl *SyncListener) handleSyncCommand(syncCmd map[string]interface{}) {
 func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
+
+	// Wait if leader is in compaction mode (version 0)
+	if err := sl.waitForLeaderReadyIfNeeded(toVersion); err != nil {
+		return fmt.Errorf("failed to wait for leader ready: %w", err)
+	}
 
 	// Set execution flag to indicate this follower is reading instructions
 	if err := sl.SetFollowerExecutionFlag(sl.nodeID); err != nil {
