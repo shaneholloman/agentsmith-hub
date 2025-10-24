@@ -842,14 +842,14 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data m
 			if err == nil {
 				modifiedData[appendOp.FieldName] = boolResult
 			} else {
-				// Plugin error is already logged in plugin execution, no need to duplicate
-				// But add context information for better debugging
+				// Log error with full context to Redis (plugin executor only logs to local file)
 				projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
-				logger.Info("Check-type plugin evaluation failed in append",
+				logger.PluginErrorWithContext("Check-type plugin evaluation failed in append",
 					"plugin", appendOp.Plugin.Name,
 					"project", projectID,
 					"ruleset", rulesetID,
-					"ruleID", rule.ID)
+					"ruleID", rule.ID,
+					"error", err)
 			}
 		} else {
 			// For interface{} type plugins, use the original FuncEvalOther logic
@@ -866,14 +866,14 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data m
 
 				modifiedData[appendOp.FieldName] = res
 			} else if err != nil {
-				// Plugin error is already logged in plugin execution, no need to duplicate
-				// But add context information for better debugging
+				// Log error with full context to Redis (plugin executor only logs to local file)
 				projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
-				logger.Info("Interface-type plugin evaluation failed in append",
+				logger.PluginErrorWithContext("Interface-type plugin evaluation failed in append",
 					"plugin", appendOp.Plugin.Name,
 					"project", projectID,
 					"ruleset", rulesetID,
-					"ruleID", rule.ID)
+					"ruleID", rule.ID,
+					"error", err)
 			}
 		}
 	}
@@ -905,14 +905,14 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data m
 	if modifyOp.Plugin.ReturnType == "bool" {
 		boolResult, err := modifyOp.Plugin.FuncEvalCheckNode(args...)
 		if err != nil {
-			// Plugin error is already logged in plugin execution, no need to duplicate
-			// But add context information for better debugging
+			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
-			logger.Info("Check-type plugin evaluation failed in modify",
+			logger.PluginErrorWithContext("Check-type plugin evaluation failed in modify",
 				"plugin", modifyOp.Plugin.Name,
 				"project", projectID,
 				"ruleset", rulesetID,
-				"ruleID", rule.ID)
+				"ruleID", rule.ID,
+				"error", err)
 			return
 		}
 		if modifyOp.FieldName != "" {
@@ -928,14 +928,14 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data m
 	res, ok, err := modifyOp.Plugin.FuncEvalOther(args...)
 	if err != nil || !ok {
 		if err != nil {
-			// Plugin error is already logged in plugin execution, no need to duplicate
-			// But add context information for better debugging
+			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
-			logger.Info("Interface-type plugin evaluation failed in modify",
+			logger.PluginErrorWithContext("Interface-type plugin evaluation failed in modify",
 				"plugin", modifyOp.Plugin.Name,
 				"project", projectID,
 				"ruleset", rulesetID,
-				"ruleID", rule.ID)
+				"ruleID", rule.ID,
+				"error", err)
 		}
 		return
 	}
@@ -994,14 +994,14 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 		// For check-type plugins (bool return type), use FuncEvalCheckNode
 		ok, err := pluginOp.Plugin.FuncEvalCheckNode(args...)
 		if err != nil {
-			// Plugin error is already logged in plugin execution, no need to duplicate
-			// But add context information for better debugging
+			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
-			logger.Info("Check-type plugin evaluation failed",
+			logger.PluginErrorWithContext("Check-type plugin evaluation failed",
 				"plugin", pluginOp.Plugin.Name,
 				"project", projectID,
 				"ruleset", rulesetID,
-				"ruleID", rule.ID)
+				"ruleID", rule.ID,
+				"error", err)
 		}
 
 		if !ok {
@@ -1011,14 +1011,14 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 		// For interface{} type plugins, use FuncEvalOther (for side effects, result is ignored)
 		_, ok, err := pluginOp.Plugin.FuncEvalOther(args...)
 		if err != nil {
-			// Plugin error is already logged in plugin execution, no need to duplicate
-			// But add context information for better debugging
+			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
-			logger.Info("Interface-type plugin evaluation failed",
+			logger.PluginErrorWithContext("Interface-type plugin evaluation failed",
 				"plugin", pluginOp.Plugin.Name,
 				"project", projectID,
 				"ruleset", rulesetID,
-				"ruleID", rule.ID)
+				"ruleID", rule.ID,
+				"error", err)
 		}
 
 		if !ok {

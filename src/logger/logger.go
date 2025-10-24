@@ -326,9 +326,18 @@ func TestAccessLogger() error {
 }
 
 // Plugin-specific logging functions
+// PluginError logs plugin errors to local file only (does not write to Redis)
+// This avoids duplicate error logs when both plugin executor and rules engine log the same error
 func PluginError(msg string, args ...any) {
 	pluginLog := GetPluginLogger()
-	pluginLog.Error(msg, args...)
+	pluginLog.Info(msg, args...) // Changed to Info level to avoid Redis write
+}
+
+// PluginErrorWithContext logs plugin errors with full context to Redis
+// This should be called from rules engine with project/ruleset/rule information
+func PluginErrorWithContext(msg string, args ...any) {
+	pluginLog := GetPluginLogger()
+	pluginLog.Error(msg, args...) // Error level to write to Redis
 }
 
 func PluginWarn(msg string, args ...any) {
