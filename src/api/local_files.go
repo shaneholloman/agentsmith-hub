@@ -833,9 +833,6 @@ func loadLocalChanges(c echo.Context) error {
 				if err != nil {
 					logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
 				}
-				if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
-					logger.Error("Failed to publish project restart instructions", "affected_projects", projectID, "error", err)
-				}
 			}
 		}
 	}
@@ -911,9 +908,6 @@ func loadSingleLocalChange(c echo.Context) error {
 			err := p.Restart(true, "local_change")
 			if err != nil {
 				logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
-			}
-			if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
-				logger.Error("Failed to publish project restart instructions", "affected_projects", projectID, "error", err)
 			}
 		}
 	}

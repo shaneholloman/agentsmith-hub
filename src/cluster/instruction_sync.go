@@ -57,18 +57,34 @@ type InstructionCompactionRule struct {
 	Operations    []string // operations that can be compacted
 }
 
+// PendingInstruction represents an instruction waiting to be processed
+type PendingInstruction struct {
+	ComponentName string
+	ComponentType string
+	Content       string
+	Operation     string
+	Dependencies  []string
+	Metadata      map[string]interface{}
+	ResultChan    chan error // channel to return the result
+}
+
 // InstructionManager manages version-based synchronization
 type InstructionManager struct {
 	currentVersion  int64
 	baseVersion     string
 	mu              sync.RWMutex
 	maxInstructions int64 // trigger compaction when exceeding this number
+	queue           chan *PendingInstruction
+	workerStopped   chan struct{}
+	once            sync.Once
 }
 
 func (im *InstructionManager) NewInstructionManagerFollower() *InstructionManager {
 	return &InstructionManager{
 		currentVersion: 0,
 		baseVersion:    "0",
+		queue:          make(chan *PendingInstruction, 1000), // buffer for 1000 pending instructions
+		workerStopped:  make(chan struct{}),
 	}
 }
 
@@ -96,10 +112,15 @@ func generateSessionID() string {
 // InitInstructionManager initializes the instruction manager
 func InitInstructionManager() {
 	GlobalInstructionManager = &InstructionManager{
-		currentVersion:  0,                   // Start with version 0 (temporary state)
-		baseVersion:     generateSessionID(), // Session identifier (6-char random string)
-		maxInstructions: 2000,                // compact when > 1000 instructions
+		currentVersion:  0,                                    // Start with version 0 (temporary state)
+		baseVersion:     generateSessionID(),                  // Session identifier (6-char random string)
+		maxInstructions: 2000,                                 // compact when > 1000 instructions
+		queue:           make(chan *PendingInstruction, 1000), // buffer for 1000 pending instructions
+		workerStopped:   make(chan struct{}),
 	}
+
+	// Start the queue worker
+	GlobalInstructionManager.startWorker()
 }
 
 // GetCurrentVersion returns current version string
@@ -194,135 +215,30 @@ func (im *InstructionManager) loadAllInstructions(maxVersion int64) ([]*Instruct
 	return instructions, nil
 }
 
-func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error {
-	// Wait for all followers to complete their current synchronization
-	// Timeout is 45s (execution flag TTL is 30s, plus 15s buffer)
-	kickedFollowers := false
-	if err := im.WaitForAllFollowersIdle(45 * time.Second); err != nil {
-		logger.Warn("Timeout waiting for followers to complete sync, will kick out slow followers", "error", err)
+// startWorker starts the queue worker to process instructions sequentially
+func (im *InstructionManager) startWorker() {
+	go func() {
+		defer close(im.workerStopped)
 
-		// Get the list of slow/stuck followers
-		activeFollowers, _ := im.GetActiveFollowers()
+		for pending := range im.queue {
+			// Process the instruction synchronously with lock
+			err := im.processInstructionInternal(
+				pending.ComponentName,
+				pending.ComponentType,
+				pending.Content,
+				pending.Operation,
+				pending.Dependencies,
+				pending.Metadata,
+			)
 
-		// Kick out these followers - they will full resync on next heartbeat
-		for _, followerID := range activeFollowers {
-			if err := im.KickFollowerForResync(followerID); err != nil {
-				logger.Error("Failed to kick follower", "follower_id", followerID, "error", err)
-			} else {
-				logger.Info("Kicked out slow follower for full resync", "follower_id", followerID)
-			}
+			// Send result back to caller
+			pending.ResultChan <- err
 		}
-
-		kickedFollowers = len(activeFollowers) > 0
-		// Continue with compaction - don't block the cluster
-		logger.Info("Kicked out slow followers, proceeding with compaction", "kicked_count", len(activeFollowers))
-	}
-
-	if kickedFollowers {
-		logger.Info("Proceeding with instruction compaction (slow followers were kicked out)")
-	} else {
-		logger.Info("All followers are idle, proceeding with instruction compaction")
-	}
-
-	originalVersion, err := im.setCurrentVersion(0)
-	if err != nil {
-		return err
-	}
-
-	delInstructions := map[int]bool{}
-	instructions, err := im.loadAllInstructions(originalVersion)
-	if err != nil {
-		im.currentVersion = originalVersion
-		_, _ = im.setCurrentVersion(originalVersion)
-		return fmt.Errorf("failed to load instructions: %w", err)
-	}
-
-	instructions = append(instructions, new)
-	for i, ii := range instructions {
-		if CheckDeletedIntention(ii) {
-			continue
-		}
-
-		for i2 := i + 1; i2 < len(instructions); i2++ {
-			ii2 := instructions[i2]
-			if (ii.ComponentType == ii2.ComponentType) && (ii.ComponentName == ii2.ComponentName) {
-				if CUD_OPERATION[ii.Operation] && CUD_OPERATION[ii2.Operation] {
-					delInstructions[i] = true
-					break
-				} else if PROJECT_OPERATION[ii.Operation] && PROJECT_OPERATION[ii2.Operation] {
-					delInstructions[i] = true
-					break
-				}
-			}
-		}
-	}
-
-	// Track failed writes to ensure atomicity of compaction
-	var failedWrites []int64
-
-	for i, instruction := range instructions {
-		instruction.Version = int64(i + 1)
-		key := fmt.Sprintf("cluster:instruction:%d", instruction.Version)
-
-		if delInstructions[i] {
-			// Write deleted instruction marker with retry
-			err := common.RetryWithExponentialBackoff(func() error {
-				_, e := common.RedisSet(key, GetDeletedIntentionsString(), 0)
-				return e
-			}, 3, 100*time.Millisecond)
-
-			if err != nil {
-				logger.Error("Failed to store compacted instruction after retries", "version", instruction.Version, "error", err)
-				failedWrites = append(failedWrites, instruction.Version)
-			}
-		} else {
-			// Write actual instruction with retry
-			data, _ := json.Marshal(instruction)
-			err := common.RetryWithExponentialBackoff(func() error {
-				_, e := common.RedisSet(key, string(data), 0)
-				return e
-			}, 3, 100*time.Millisecond)
-
-			if err != nil {
-				logger.Error("Failed to store compacted instruction after retries", "version", instruction.Version, "error", err)
-				failedWrites = append(failedWrites, instruction.Version)
-			}
-		}
-	}
-
-	// If any writes failed, rollback and return error
-	if len(failedWrites) > 0 {
-		logger.Error("Compaction failed due to Redis write failures, rolling back",
-			"failed_count", len(failedWrites),
-			"failed_versions", failedWrites,
-			"original_version", originalVersion)
-
-		// Rollback: restore original version
-		im.currentVersion = originalVersion
-		_, _ = im.setCurrentVersion(originalVersion)
-
-		return fmt.Errorf("compaction failed: %d instructions failed to write after retries", len(failedWrites))
-	}
-
-	// All writes succeeded, update version
-	_, err = im.setCurrentVersion(int64(len(instructions)))
-	if err != nil {
-		// If version update fails, also rollback
-		logger.Error("Failed to update version after compaction, rolling back", "error", err)
-		im.currentVersion = originalVersion
-		_, _ = im.setCurrentVersion(originalVersion)
-		return fmt.Errorf("failed to update version after compaction: %w", err)
-	}
-
-	logger.Info("Compaction completed successfully",
-		"original_version", originalVersion,
-		"new_version", int64(len(instructions)),
-		"instructions_count", len(instructions))
-
-	return nil
+	}()
 }
 
-func (im *InstructionManager) PublishInstruction(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
+// processInstructionInternal processes an instruction with proper locking
+func (im *InstructionManager) processInstructionInternal(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 
@@ -402,6 +318,180 @@ func (im *InstructionManager) PublishInstruction(componentName, componentType, c
 	)
 
 	return nil
+}
+
+func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error {
+	// Wait for all followers to complete their current synchronization
+	// Timeout is 45s (execution flag TTL is 30s, plus 15s buffer)
+	kickedFollowers := false
+	if err := im.WaitForAllFollowersIdle(45 * time.Second); err != nil {
+		logger.Warn("Timeout waiting for followers to complete sync, will kick out slow followers", "error", err)
+
+		// Get the list of slow/stuck followers
+		activeFollowers, _ := im.GetActiveFollowers()
+
+		// Kick out these followers - they will full resync on next heartbeat
+		for _, followerID := range activeFollowers {
+			if err := im.KickFollowerForResync(followerID); err != nil {
+				logger.Error("Failed to kick follower", "follower_id", followerID, "error", err)
+			} else {
+				logger.Info("Kicked out slow follower for full resync", "follower_id", followerID)
+			}
+		}
+
+		kickedFollowers = len(activeFollowers) > 0
+		// Continue with compaction - don't block the cluster
+		logger.Info("Kicked out slow followers, proceeding with compaction", "kicked_count", len(activeFollowers))
+	}
+
+	if kickedFollowers {
+		logger.Info("Proceeding with instruction compaction (slow followers were kicked out)")
+	}
+
+	originalVersion, err := im.setCurrentVersion(0)
+	if err != nil {
+		return err
+	}
+
+	delInstructions := map[int]bool{}
+	instructions, err := im.loadAllInstructions(originalVersion)
+	if err != nil {
+		im.currentVersion = originalVersion
+		_, _ = im.setCurrentVersion(originalVersion)
+		return fmt.Errorf("failed to load instructions: %w", err)
+	}
+
+	originalLen := len(instructions)
+	instructions = append(instructions, new)
+	instructionsLen := len(instructions)
+
+	for i, ii := range instructions {
+		if CheckDeletedIntention(ii) {
+			continue
+		}
+
+		for i2 := i + 1; i2 < instructionsLen; i2++ {
+			ii2 := instructions[i2]
+			if (ii.ComponentType == ii2.ComponentType) && (ii.ComponentName == ii2.ComponentName) {
+				if CUD_OPERATION[ii.Operation] && CUD_OPERATION[ii2.Operation] {
+					delInstructions[i] = true
+					break
+				} else if PROJECT_OPERATION[ii.Operation] && PROJECT_OPERATION[ii2.Operation] {
+					delInstructions[i] = true
+					break
+				}
+			}
+		}
+	}
+
+	// Track failed writes to ensure atomicity of compaction
+	var failedWrites []int64
+
+	for i, instruction := range instructions {
+		instruction.Version = int64(i + 1)
+		key := fmt.Sprintf("cluster:instruction:%d", instruction.Version)
+
+		if delInstructions[i] {
+			// Write deleted instruction marker with retry
+			err := common.RetryWithExponentialBackoff(func() error {
+				_, e := common.RedisSet(key, GetDeletedIntentionsString(), 0)
+				return e
+			}, 3, 100*time.Millisecond)
+
+			if err != nil {
+				logger.Error("Failed to store compacted instruction after retries", "version", instruction.Version, "error", err)
+				failedWrites = append(failedWrites, instruction.Version)
+			}
+		}
+
+		// Write new instruction
+		if i+1 == instructionsLen {
+			data, _ := json.Marshal(instruction)
+			err := common.RetryWithExponentialBackoff(func() error {
+				_, e := common.RedisSet(key, string(data), 0)
+				return e
+			}, 3, 100*time.Millisecond)
+
+			if err != nil {
+				logger.Error("Failed to store compacted instruction after retries", "version", instruction.Version, "error", err)
+				failedWrites = append(failedWrites, instruction.Version)
+			}
+		}
+	}
+
+	// If any writes failed, rollback and return error
+	if len(failedWrites) > 0 {
+		logger.Error("Compaction failed due to Redis write failures, rolling back",
+			"failed_count", len(failedWrites),
+			"failed_versions", failedWrites,
+			"original_version", originalVersion)
+
+		// Rollback: restore original version
+		im.currentVersion = originalVersion
+		_, _ = im.setCurrentVersion(originalVersion)
+
+		return fmt.Errorf("compaction failed: %d instructions failed to write after retries", len(failedWrites))
+	}
+
+	// All writes succeeded, update version
+	_, err = im.setCurrentVersion(int64(len(instructions)))
+	if err != nil {
+		// If version update fails, also rollback
+		logger.Error("Failed to update version after compaction, rolling back", "error", err)
+		im.currentVersion = originalVersion
+		_, _ = im.setCurrentVersion(originalVersion)
+		return fmt.Errorf("failed to update version after compaction: %w", err)
+	}
+
+	logger.Info("Compaction completed successfully",
+		"original_version", originalVersion,
+		"new_version", int64(len(instructions)),
+		"old_instructions_count", originalLen)
+
+	return nil
+}
+
+func (im *InstructionManager) PublishInstruction(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
+	if !common.IsCurrentNodeLeader() {
+		return fmt.Errorf("only leader can initialize instructions")
+	}
+
+	if componentName == "" || componentType == "" || operation == "" {
+		return fmt.Errorf("component name, type, and operation are required")
+	}
+
+	// Check if queue is nil (shouldn't happen but safety check)
+	if im.queue == nil {
+		logger.Error("Queue is nil, falling back to direct processing")
+		// Fallback to direct processing if queue not initialized
+		return im.processInstructionInternal(componentName, componentType, content, operation, dependencies, metadata)
+	}
+
+	// Create a result channel for this instruction
+	resultChan := make(chan error, 1)
+
+	// Create pending instruction
+	pending := &PendingInstruction{
+		ComponentName: componentName,
+		ComponentType: componentType,
+		Content:       content,
+		Operation:     operation,
+		Dependencies:  dependencies,
+		Metadata:      metadata,
+		ResultChan:    resultChan,
+	}
+
+	// Submit to queue (non-blocking if queue has buffer space)
+	select {
+	case im.queue <- pending:
+		// Successfully queued, wait for result
+		err := <-resultChan
+		return err
+	default:
+		// Queue is full, this should rarely happen but we need to handle it
+		logger.Error("Instruction queue is full, falling back to direct processing")
+		return im.processInstructionInternal(componentName, componentType, content, operation, dependencies, metadata)
+	}
 }
 
 // operationRequiresRestart determines if an operation requires project restart
@@ -568,12 +658,13 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 
 	// Helper function to publish instruction without triggering compaction
 	publishInstructionDirectly := func(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
+		instructionCount++
 		// Determine if this operation requires project restart
 		requiresRestart := im.operationRequiresRestart(operation, componentType)
 
 		// Prepare instruction with temporary version (will be set after successful write)
 		instruction := Instruction{
-			Version:         instructionCount + 1, // Next version number
+			Version:         instructionCount, // Next version number
 			ComponentName:   componentName,
 			ComponentType:   componentType,
 			Content:         content,
@@ -585,7 +676,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		}
 
 		// Store instruction in Redis
-		key := fmt.Sprintf("cluster:instruction:%d", instruction.Version)
+		key := fmt.Sprintf("cluster:instruction:%d", instructionCount)
 		data, err := json.Marshal(instruction)
 		if err != nil {
 			return fmt.Errorf("failed to marshal instruction: %w", err)
@@ -594,9 +685,6 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		if _, err := common.RedisSet(key, string(data), 0); err != nil {
 			return fmt.Errorf("failed to store instruction: %w", err)
 		}
-
-		// Only increment counter after successful write
-		instructionCount++
 		return nil
 	}
 
@@ -758,6 +846,20 @@ func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) err
 }
 
 func (im *InstructionManager) Stop() {
+	// Stop the queue worker if it's running
+	if im.queue != nil {
+		logger.Info("Stopping instruction queue worker")
+		close(im.queue)
+
+		// Wait for worker to stop with timeout
+		select {
+		case <-im.workerStopped:
+			logger.Info("Instruction queue worker stopped")
+		case <-time.After(5 * time.Second):
+			logger.Warn("Timeout waiting for instruction queue worker to stop")
+		}
+	}
+
 	// Only leader should clean up cluster instructions
 	// Followers should not delete instructions as they are managed by leader
 	if common.IsCurrentNodeLeader() {

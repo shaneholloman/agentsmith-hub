@@ -170,11 +170,7 @@ func main() {
 		loadLocalProjects()
 
 		common.InitClusterSystemManager()
-		err = cluster.GlobalClusterManager.Start()
-		if err != nil {
-			logger.Error("InitClusterSystemManager Error", "error", err)
-			return
-		}
+		_ = cluster.GlobalClusterManager.Start()
 
 		go api.ServerStart(*apiListen) // start Echo API on specified address
 		logger.Info("Leader API server starting", "address", *apiListen)

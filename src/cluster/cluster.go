@@ -3,6 +3,7 @@ package cluster
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"os"
 	"time"
 )
 
@@ -50,7 +51,8 @@ func (cm *ClusterManager) Start() error {
 		if common.IsCurrentNodeLeader() {
 			// Leader: Initialize instructions for existing components
 			if err := cm.instructionManager.InitializeLeaderInstructions(); err != nil {
-				return err
+				logger.Error("Failed to initialize leader instructions, exiting program", "error", err)
+				os.Exit(1)
 			}
 		}
 	}
