@@ -1,7 +1,6 @@
 package api
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
