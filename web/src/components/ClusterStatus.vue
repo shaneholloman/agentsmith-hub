@@ -19,21 +19,6 @@
           </select>
         </div>
         
-        <!-- Load Filter -->
-        <div class="flex items-center space-x-2">
-          <label class="text-sm font-medium text-gray-700">Load Filter:</label>
-          <select
-            v-model="loadFilter"
-            class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-          >
-            <option value="all">All Nodes</option>
-            <option value="high_cpu">High CPU (>80%)</option>
-            <option value="high_memory">High Memory (>85%)</option>
-            <option value="high_load">High Load (CPU>80% or Memory>85%)</option>
-            <option value="critical">Critical Load (CPU>90% or Memory>90%)</option>
-          </select>
-        </div>
-        
         <!-- Search Bar -->
         <div class="relative max-w-md">
           <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -73,34 +58,10 @@
         </svg>
         Unknown Version ({{ getUnknownVersionCount() }})
       </button>
-      
-      <!-- Load Quick Actions -->
-      <div class="hidden lg:block border-l border-gray-300 h-6"></div>
-      
-      <button
-        @click="filterHighLoad"
-        class="px-3 py-1.5 text-sm font-medium text-yellow-700 bg-yellow-100 border border-yellow-300 rounded-lg hover:bg-yellow-200 transition-colors"
-        :class="{ 'bg-yellow-200 border-yellow-400': loadFilter === 'high_load' }"
-      >
-        <svg class="w-4 h-4 inline mr-1" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
-        </svg>
-        High Load ({{ getHighLoadCount() }})
-      </button>
-      <button
-        @click="filterCriticalLoad"
-        class="px-3 py-1.5 text-sm font-medium text-red-700 bg-red-100 border border-red-300 rounded-lg hover:bg-red-200 transition-colors"
-        :class="{ 'bg-red-200 border-red-400': loadFilter === 'critical' }"
-      >
-        <svg class="w-4 h-4 inline mr-1" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-        </svg>
-        Critical Load ({{ getCriticalLoadCount() }})
-      </button>
     </div>
 
     <!-- Filter Summary -->
-    <div v-if="versionFilter !== 'all' || loadFilter !== 'all' || searchQuery" class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+    <div v-if="versionFilter !== 'all' || searchQuery" class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-2">
           <svg class="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
@@ -120,9 +81,6 @@
       <div class="mt-1 text-xs text-blue-600 space-y-1">
         <div v-if="versionFilter !== 'all'">
           Version Filter: {{ getVersionFilterDescription() }}
-        </div>
-        <div v-if="loadFilter !== 'all'">
-          Load Filter: {{ getLoadFilterDescription() }}
         </div>
       </div>
     </div>
@@ -147,9 +105,7 @@
         :key="node.id"
         class="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden transition-all duration-200 hover:shadow-lg"
         :class="{
-          'ring-2 ring-blue-500 border-blue-500': node.isLeader,
-          'ring-2 ring-red-500 border-red-500': node.hasStatusIssue,
-          'ring-1 ring-yellow-500 border-yellow-500': node.hasPerformanceIssue
+          'ring-2 ring-blue-500 border-blue-500': node.isLeader
         }"
       >
         <!-- Main Node Info Row with horizontal scroll for wide content -->
@@ -178,60 +134,13 @@
                 <div class="text-sm text-gray-500 truncate" :title="node.id">ID: {{ node.id }}</div>
               </div>
               
-              <!-- Status Indicators -->
+              <!-- Status Indicator - Single dot with priority: Healthy > Version -->
               <div class="flex items-center space-x-2 flex-shrink-0">
-                <!-- Health Status (always rendered to reserve width) -->
                 <div
                   class="w-3 h-3 rounded-full"
-                  :class="node.isHealthy ? 'bg-green-500' : 'bg-red-500'"
-                  :title="node.isHealthy ? 'Healthy' : 'Unhealthy'"
+                  :class="getNodeStatusClass(node)"
+                  :title="getNodeStatusTitle(node)"
                 ></div>
-
-                <!-- Status Consistency -->
-                <div class="w-3 h-3">
-                  <div
-                    v-if="node.hasStatusIssue"
-                    class="w-3 h-3 rounded-full bg-red-500 animate-pulse"
-                    title="Status inconsistent with leader"
-                  ></div>
-                </div>
-
-                <!-- Performance Warning -->
-                <div class="w-3 h-3">
-                  <div
-                    v-if="node.hasPerformanceIssue"
-                    class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
-                    title="Performance issue detected"
-                  ></div>
-                </div>
-
-                <!-- Version Status -->
-                <div class="w-3 h-3">
-                  <div
-                    v-if="getVersionStatus(node) === 'mismatch'"
-                    class="w-3 h-3 rounded-full bg-orange-500 animate-pulse"
-                    title="Version mismatch detected"
-                  ></div>
-                  <div
-                    v-else-if="getVersionStatus(node) === 'unknown'"
-                    class="w-3 h-3 rounded-full bg-gray-400"
-                    title="Version unknown"
-                  ></div>
-                </div>
-
-                <!-- Load Status -->
-                <div class="w-3 h-3">
-                  <div
-                    v-if="getLoadStatus(node) === 'critical'"
-                    class="w-3 h-3 rounded-full bg-red-500 animate-pulse"
-                    title="Critical load detected"
-                  ></div>
-                  <div
-                    v-else-if="getLoadStatus(node) === 'high_load'"
-                    class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
-                    title="High load detected"
-                  ></div>
-                </div>
               </div>
             </div>
 
@@ -330,20 +239,6 @@
             </div>
           </div>
         </div>
-
-        <!-- Status Issues Alert (if any) -->
-        <div v-if="node.hasStatusIssue || node.hasPerformanceIssue" class="px-6 py-3 bg-red-50 border-t border-red-100">
-          <div class="flex items-start space-x-2">
-            <svg class="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-            </svg>
-            <div class="text-sm">
-              <div v-if="node.hasStatusIssue" class="text-red-700 font-medium">Status Inconsistency</div>
-              <div v-if="node.hasPerformanceIssue" class="text-yellow-700 font-medium">Performance Issue</div>
-              <div class="text-red-600 mt-1">{{ getIssueDescription(node) }}</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -369,7 +264,6 @@ const nodeMessageData = ref({})
 const systemMetrics = ref({})
 const refreshInterval = ref(null)
 const versionFilter = ref('all') // New state for version filter
-const loadFilter = ref('all') // New state for load filter
 
 // Data cache store
 const dataCache = useDataCacheStore()
@@ -377,13 +271,12 @@ const dataCache = useDataCacheStore()
 // Computed properties
 const filteredNodes = computed(() => {
   const nodes = processedNodes.value
-  if (versionFilter.value === 'all' && loadFilter.value === 'all' && !searchQuery.value.trim()) {
+  if (versionFilter.value === 'all' && !searchQuery.value.trim()) {
     return nodes
   }
   
   const query = searchQuery.value.toLowerCase().trim()
   const versionFilterValue = versionFilter.value
-  const loadFilterValue = loadFilter.value
   const leaderVersion = getLeaderVersion()
   
   return nodes.filter(node => {
@@ -396,14 +289,7 @@ const filteredNodes = computed(() => {
       matchesVersionFilter = versionStatus === versionFilterValue
     }
     
-    // Check load filter
-    let matchesLoadFilter = true
-    if (loadFilterValue !== 'all') {
-      const loadStatus = getLoadStatus(node)
-      matchesLoadFilter = loadStatus === loadFilterValue
-    }
-    
-    return matchesSearch && matchesVersionFilter && matchesLoadFilter
+    return matchesSearch && matchesVersionFilter
   })
 })
 
@@ -419,13 +305,8 @@ const processedNodes = computed(() => {
       isHealthy: true,
       lastSeen: new Date(),
       version: clusterInfo.value.version || 'unknown',
-      metrics: getNodeMetrics(clusterInfo.value.self_id),
-      hasStatusIssue: false,
-      hasPerformanceIssue: false
+      metrics: getNodeMetrics(clusterInfo.value.self_id)
     }
-    
-    // Check for performance issues
-    selfNode.hasPerformanceIssue = checkPerformanceIssues(selfNode)
     
     nodes.push(selfNode)
   }
@@ -441,13 +322,8 @@ const processedNodes = computed(() => {
           isHealthy: node.is_healthy,
           lastSeen: new Date(node.last_seen * 1000), // Convert Unix timestamp (seconds) to milliseconds
           version: node.version || 'unknown',
-          metrics: getNodeMetrics(node.id),
-          hasStatusIssue: checkStatusConsistency(node),
-          hasPerformanceIssue: false
+          metrics: getNodeMetrics(node.id)
         }
-        
-        // Check for performance issues
-        processedNode.hasPerformanceIssue = checkPerformanceIssues(processedNode)
         
         nodes.push(processedNode)
       }
@@ -496,39 +372,40 @@ function getNodeMetrics(nodeId) {
   return defaultMetrics
 }
 
-function checkStatusConsistency(node) {
-  // Check if node's leader status is consistent with cluster state
-  const expectedLeaderStatus = node.id === clusterInfo.value.leader_id
-  return node.status === 'leader' !== expectedLeaderStatus
-}
-
-function checkPerformanceIssues(node) {
-  const metrics = node.metrics
-  // Define performance thresholds
-  const CPU_WARNING_THRESHOLD = 80
-  const MEMORY_WARNING_THRESHOLD = 85
-  
-  return metrics.cpuPercent > CPU_WARNING_THRESHOLD || 
-         metrics.memoryPercent > MEMORY_WARNING_THRESHOLD
-}
-
-function getIssueDescription(node) {
-  const issues = []
-  
-  if (node.hasStatusIssue) {
-    issues.push('Node status inconsistent with cluster leader')
+// Get node overall status class (single indicator)
+// Priority: Healthy > Version
+function getNodeStatusClass(node) {
+  // Priority 1: Check health status (most important)
+  if (!node.isHealthy) {
+    return 'bg-red-500'
   }
   
-  if (node.hasPerformanceIssue) {
-    if (node.metrics.cpuPercent > 80) {
-      issues.push(`High CPU usage: ${node.metrics.cpuPercent.toFixed(1)}%`)
-    }
-    if (node.metrics.memoryPercent > 85) {
-      issues.push(`High memory usage: ${node.metrics.memoryPercent.toFixed(1)}%`)
-    }
+  // Priority 2: Check version status
+  const versionStatus = getVersionStatus(node)
+  if (versionStatus === 'mismatch') {
+    return 'bg-orange-500'
   }
   
-  return issues.join(', ')
+  // All good
+  return 'bg-green-500'
+}
+
+// Get node overall status title (tooltip)
+function getNodeStatusTitle(node) {
+  // Priority 1: Check health status
+  if (!node.isHealthy) {
+    return 'Unhealthy - Node is experiencing issues'
+  }
+  
+  // Priority 2: Check version status
+  const versionStatus = getVersionStatus(node)
+  if (versionStatus === 'mismatch') {
+    const leaderVersion = getLeaderVersion()
+    return `Version Mismatch - Node: ${node.version}, Leader: ${leaderVersion}`
+  }
+  
+  // All good
+  return 'Healthy - All systems operational'
 }
 
 // Version-related helper functions
@@ -608,34 +485,6 @@ function getVersionStatus(node) {
   return 'mismatch'
 }
 
-function getLoadStatus(node) {
-  const metrics = node.metrics
-  const cpuPercent = metrics.cpuPercent || 0
-  const memoryPercent = metrics.memoryPercent || 0
-  
-  // Critical load: CPU > 90% or Memory > 90%
-  if (cpuPercent > 90 || memoryPercent > 90) {
-    return 'critical'
-  }
-  
-  // High load: CPU > 80% or Memory > 85%
-  if (cpuPercent > 80 || memoryPercent > 85) {
-    return 'high_load'
-  }
-  
-  // High CPU only: CPU > 80%
-  if (cpuPercent > 80) {
-    return 'high_cpu'
-  }
-  
-  // High Memory only: Memory > 85%
-  if (memoryPercent > 85) {
-    return 'high_memory'
-  }
-  
-  return 'normal'
-}
-
 function getVersionFilterDescription() {
   if (versionFilter.value === 'all') {
     return 'All nodes'
@@ -655,17 +504,6 @@ function getVersionFilterDescription() {
 function clearFilters() {
   searchQuery.value = ''
   versionFilter.value = 'all'
-  loadFilter.value = 'all'
-}
-
-function filterHighLoad() {
-  loadFilter.value = 'high_load'
-  searchQuery.value = ''
-}
-
-function filterCriticalLoad() {
-  loadFilter.value = 'critical'
-  searchQuery.value = ''
 }
 
 function filterVersionMismatch() {
@@ -686,52 +524,13 @@ function getUnknownVersionCount() {
   return processedNodes.value.filter(node => getVersionStatus(node) === 'unknown').length
 }
 
-function getHighLoadCount() {
-  return processedNodes.value.filter(node => getLoadStatus(node) === 'high_load').length
-}
-
-function getCriticalLoadCount() {
-  return processedNodes.value.filter(node => getLoadStatus(node) === 'critical').length
-}
-
-function getLoadFilterDescription() {
-  switch (loadFilter.value) {
-    case 'high_cpu':
-      return 'High CPU usage (>80%)'
-    case 'high_memory':
-      return 'High Memory usage (>85%)'
-    case 'high_load':
-      return 'High Load (CPU>80% or Memory>85%)'
-    case 'critical':
-      return 'Critical Load (CPU>90% or Memory>90%)'
-    default:
-      return 'All nodes'
-  }
-}
-
 function getLoadAwareCPUColor(node) {
-  const loadStatus = getLoadStatus(node)
   const cpuPercent = node.metrics.cpuPercent || 0
-  
-  if (loadStatus === 'critical' && cpuPercent > 90) {
-    return 'text-red-600'
-  }
-  if (loadStatus === 'high_load' || loadStatus === 'high_cpu') {
-    return 'text-yellow-600'
-  }
   return getCPUColor(cpuPercent)
 }
 
 function getLoadAwareMemoryColor(node) {
-  const loadStatus = getLoadStatus(node)
   const memoryPercent = node.metrics.memoryPercent || 0
-  
-  if (loadStatus === 'critical' && memoryPercent > 90) {
-    return 'text-red-600'
-  }
-  if (loadStatus === 'high_load' || loadStatus === 'high_memory') {
-    return 'text-yellow-600'
-  }
   return getMemoryColor(memoryPercent)
 }
 
