@@ -455,12 +455,6 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			InputSchema: map[string]common.MCPToolArg{},
 			Annotations: createAnnotations("View Pending", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
-		{
-			Name:        "apply_changes",
-			Description: "DEPLOY CHANGES: Apply all pending changes to make them active in production. Use after reviewing pending changes!",
-			InputSchema: map[string]common.MCPToolArg{},
-			Annotations: createAnnotations("Deploy Changes", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
-		},
 
 		// Testing Tools
 		{
@@ -561,8 +555,6 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		return m.handlePluginTemplate(args)
 	case "plugin_example":
 		return m.handlePluginExample(args)
-	case "deployment_center":
-		return m.handleApplyChanges(args)
 	case "learning_center":
 		return m.handleGetRulesets(args)
 	case "smart_assistant":
@@ -589,8 +581,6 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		return m.handleGetErrorLogs(args)
 	case "get_pending_changes":
 		return m.handleGetPendingChanges(args)
-	case "apply_changes":
-		return m.handleApplyChanges(args)
 	case "verify_changes":
 		return m.handleVerifyChanges(args)
 	}
@@ -682,8 +672,6 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		// Pending changes management
 		"get_pending_changes":          {"GET", "/pending-changes", true},
 		"get_enhanced_pending_changes": {"GET", "/pending-changes/enhanced", true},
-		"apply_changes":                {"POST", "/apply-changes", true},
-		"apply_changes_enhanced":       {"POST", "/apply-changes/enhanced", true},
 		"apply_single_change":          {"POST", "/apply-single-change", true},
 		"verify_changes":               {"POST", "/verify-changes", true},
 		"verify_change":                {"POST", "/verify-change/%s/%s", true},
@@ -1184,14 +1172,11 @@ func (m *APIMapper) handleManageComponent(args map[string]interface{}) (common.M
 
 	// Step 5: Deployment if requested
 	if hasRawContent {
-		results = append(results, "Step 5: Deploying component...")
-		applyResponse, err := m.makeHTTPRequest("POST", "/apply-changes", nil, true)
-		if err != nil {
-			results = append(results, fmt.Sprintf("✗ Deployment failed: %v\n", err))
-		} else {
-			results = append(results, fmt.Sprintf("✓ Deployment completed: %s\n", string(applyResponse)))
-			results = append(results, "🎉 Component is now ACTIVE in production!")
-		}
+		results = append(results, "Step 5: Deployment")
+		results = append(results, "⚠️ Batch deployment is not available.")
+		results = append(results, "📋 Please use 'apply_single_change' for individual components or deploy via the UI.")
+		results = append(results, "")
+		results = append(results, "💡 Component created in temporary file")
 	} else {
 		results = append(results, "Step 5: Component created in temporary file")
 
@@ -2433,71 +2418,6 @@ func (m *APIMapper) handleGetPendingChanges(args map[string]interface{}) (common
 		// Fallback if parsing fails
 		results = append(results, fmt.Sprintf("✓ Pending changes retrieved: %s\n", string(pendingChangesResponse)))
 	}
-
-	return common.MCPToolResult{
-		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
-	}, nil
-}
-
-// handleApplyChanges applies all pending configuration changes
-func (m *APIMapper) handleApplyChanges(args map[string]interface{}) (common.MCPToolResult, error) {
-	_, hasEnhanced := args["enhanced"].(string)
-
-	var results []string
-	results = append(results, "=== APPLYING CHANGES ===\n")
-
-	// Step 1: Pre-deployment validation (optional but recommended)
-	results = append(results, "Step 1: Pre-deployment validation...")
-	results = append(results, "💡 Tip: Use 'get_pending_changes' first to review what will be deployed")
-
-	// Step 2: Apply changes
-	results = append(results, "Step 2: Applying changes...")
-	applyArgs := map[string]interface{}{
-		"enhanced": hasEnhanced,
-	}
-	applyResponse, err := m.makeHTTPRequest("POST", "/apply-changes", applyArgs, true)
-	if err != nil {
-		return errors.MCPError{
-			Type:    errors.ErrAPI,
-			Message: fmt.Sprintf("Change application failed: %v", err),
-			Suggestions: []string{
-				"Deployment failed - troubleshooting steps:",
-				"• Check if there are any pending changes with 'get_pending_changes'",
-				"• Verify components are valid with 'verify_changes'",
-				"• Look for dependency conflicts between components",
-				"• Check if system has sufficient resources for deployment",
-				"• Review 'get_error_logs' for detailed failure information",
-				"• Try deploying components individually if batch deployment fails",
-				"• Ensure no other deployments are in progress",
-			},
-			Details: map[string]interface{}{
-				"enhanced_mode": hasEnhanced,
-			},
-		}.ToMCPResult(), nil
-	}
-
-	// Parse response to provide post-deployment guidance
-	results = append(results, fmt.Sprintf("✓ Changes applied: %s\n", string(applyResponse)))
-
-	// Step 3: Post-deployment guidance
-	results = append(results, "\n=== 🎉 DEPLOYMENT COMPLETE ===")
-	results = append(results, "✅ **Your changes are now ACTIVE in production!**")
-	results = append(results, "")
-	results = append(results, "📋 **Recommended Next Steps:**")
-	results = append(results, "1. 🧪 **Test your changes:**")
-	results = append(results, "   → `test_ruleset id='<id>' data='<sample_data>'` - Validate rule logic")
-	results = append(results, "   → `test_project id='<id>'` - Test complete data flow")
-	results = append(results, "   → `system_overview` - Monitor system performance")
-	results = append(results, "")
-	results = append(results, "2. 🔍 **Monitor for issues:**")
-	results = append(results, "   → `get_error_logs` - Check for deployment errors")
-	results = append(results, "   → `get_cluster_status` - Ensure system stability")
-	results = append(results, "")
-	results = append(results, "3. 📊 **Verify operation:**")
-	results = append(results, "   → `get_projects` - Check project status")
-	results = append(results, "   → `get_metrics` - Monitor data flow performance")
-	results = append(results, "")
-	results = append(results, "💡 If issues arise, you can create new changes to fix them and deploy again.")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -5067,13 +4987,8 @@ func (m *APIMapper) handleCreateRuleComplete(args map[string]interface{}) (commo
 
 	// Step 5: Auto-deploy if requested
 	if autoDeploy {
-		results = append(results, "\n## Step 5: Auto-deploying Changes")
-		_, err := m.handleApplyChanges(map[string]interface{}{})
-		if err != nil {
-			results = append(results, fmt.Sprintf("⚠️ Auto-deployment failed: %v", err))
-		} else {
-			results = append(results, "🚀 Changes deployed successfully!")
-		}
+		results = append(results, "\n⚠️ Auto-deployment is not available.")
+		results = append(results, "📋 Please use 'apply_single_change' for individual components or deploy via the UI.")
 	} else {
 		results = append(results, "\n💡 **Next Steps:**")
 		results = append(results, "1. 🧪 Test rule: `test_ruleset id='"+rulesetID+"' data='<real_sample_data>'`")
@@ -5167,19 +5082,9 @@ func (m *APIMapper) handleSmartDeployment(args map[string]interface{}) (common.M
 		results = append(results, "\n## Step 4: Executing Deployment")
 		results = append(results, "🚀 Applying changes...")
 
-		_, err := m.handleApplyChanges(map[string]interface{}{})
-		if err != nil {
-			results = append(results, fmt.Sprintf("❌ Deployment failed: %v", err))
-			results = append(results, "\n🔄 Automatic rollback procedures:")
-			results = append(results, "- Previous configuration preserved")
-			results = append(results, "- System remains in stable state")
-			return common.MCPToolResult{
-				Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
-				IsError: true,
-			}, nil
-		}
-
-		results = append(results, "✅ Deployment completed successfully!")
+		results = append(results, "⚠️ Batch deployment is not available.")
+		results = append(results, "📋 Please use 'apply_single_change' for individual components or deploy via the UI.")
+		results = append(results, "✅ Skipping deployment step.")
 
 		// Step 5: Post-deployment testing
 		if testAfter {
@@ -5334,13 +5239,8 @@ func (m *APIMapper) handleComponentWizard(args map[string]interface{}) (common.M
 
 	// Auto-deploy if requested
 	if autoDeploy {
-		results = append(results, "\n## Auto-deployment")
-		_, err := m.handleApplyChanges(map[string]interface{}{})
-		if err != nil {
-			results = append(results, fmt.Sprintf("⚠️ Auto-deployment failed: %v", err))
-		} else {
-			results = append(results, "🚀 Component deployed successfully!")
-		}
+		results = append(results, "\n⚠️ Auto-deployment is not available.")
+		results = append(results, "📋 Please use 'apply_single_change' for individual components or deploy via the UI.")
 	} else {
 		results = append(results, "\n💡 **Next Steps:**")
 		results = append(results, "1. 📋 Review configuration above")
@@ -5732,14 +5632,10 @@ func (m *APIMapper) handleComponentCreate(componentType, componentID, configCont
 	results = append(results, fmt.Sprintf("✅ %s '%s' created successfully", strings.Title(componentType), componentID))
 
 	if autoDeploy {
-		_, err := m.handleApplyChanges(map[string]interface{}{})
-		if err != nil {
-			results = append(results, fmt.Sprintf("⚠️ Auto-deployment failed: %v", err))
-		} else {
-			results = append(results, "🚀 Changes deployed successfully!")
-		}
+		results = append(results, "⚠️ Auto-deployment is not available.")
+		results = append(results, "📋 Please use 'apply_single_change' for individual components or deploy via the UI.")
 	} else {
-		results = append(results, "💡 Use `apply_changes` to deploy this component")
+		results = append(results, "💡 Component needs to be deployed individually")
 	}
 
 	return common.MCPToolResult{
@@ -5774,14 +5670,10 @@ func (m *APIMapper) handleComponentUpdate(componentType, componentID, configCont
 	results = append(results, fmt.Sprintf("✅ %s '%s' updated successfully", strings.Title(componentType), componentID))
 
 	if autoDeploy {
-		_, err := m.handleApplyChanges(map[string]interface{}{})
-		if err != nil {
-			results = append(results, fmt.Sprintf("⚠️ Auto-deployment failed: %v", err))
-		} else {
-			results = append(results, "🚀 Changes deployed successfully!")
-		}
+		results = append(results, "⚠️ Auto-deployment is not available.")
+		results = append(results, "📋 Please use 'apply_single_change' for individual components or deploy via the UI.")
 	} else {
-		results = append(results, "💡 Use `apply_changes` to deploy this update")
+		results = append(results, "💡 Component needs to be deployed individually")
 	}
 
 	return common.MCPToolResult{
@@ -5812,14 +5704,10 @@ func (m *APIMapper) handleComponentDelete(componentType, componentID string, bac
 	results = append(results, fmt.Sprintf("✅ %s '%s' deleted successfully", strings.Title(componentType), componentID))
 
 	if autoDeploy {
-		_, err := m.handleApplyChanges(map[string]interface{}{})
-		if err != nil {
-			results = append(results, fmt.Sprintf("⚠️ Auto-deployment failed: %v", err))
-		} else {
-			results = append(results, "🚀 Changes deployed successfully!")
-		}
+		results = append(results, "⚠️ Auto-deployment is not available.")
+		results = append(results, "📋 Please use 'apply_single_change' for individual components or deploy via the UI.")
 	} else {
-		results = append(results, "💡 Use `apply_changes` to deploy this deletion")
+		results = append(results, "💡 Component needs to be deployed individually")
 	}
 
 	return common.MCPToolResult{
