@@ -1,10 +1,10 @@
 <template>
-  <div class="p-6 h-full overflow-auto">
-    <div class="flex justify-between items-center mb-6">
+  <div class="p-6 h-full w-full overflow-auto">
+    <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4">
       <h2 class="text-2xl font-bold text-gray-900">Cluster Nodes</h2>
       
       <!-- Search and Filter Controls -->
-      <div class="flex items-center space-x-4">
+      <div class="flex flex-wrap items-center gap-4">
         <!-- Version Filter -->
         <div class="flex items-center space-x-2">
           <label class="text-sm font-medium text-gray-700">Version Filter:</label>
@@ -52,7 +52,7 @@
     </div>
 
     <!-- Quick Actions -->
-    <div class="mb-4 flex items-center space-x-2">
+    <div class="mb-4 flex flex-wrap items-center gap-2">
       <button
         @click="filterVersionMismatch"
         class="px-3 py-1.5 text-sm font-medium text-orange-700 bg-orange-100 border border-orange-300 rounded-lg hover:bg-orange-200 transition-colors"
@@ -75,7 +75,7 @@
       </button>
       
       <!-- Load Quick Actions -->
-      <div class="border-l border-gray-300 h-6 mx-2"></div>
+      <div class="hidden lg:block border-l border-gray-300 h-6"></div>
       
       <button
         @click="filterHighLoad"

@@ -15,7 +15,7 @@
         @toggle-collapse="toggleSidebarCollapse"
         ref="sidebarRef"
       />
-      <main class="flex-1 bg-gray-50 transition-all duration-300">
+      <main class="flex-1 bg-gray-50 transition-all duration-300 overflow-hidden">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
           v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs' && selected.type !== 'settings' && selected.type !== 'tutorial'" 
