@@ -215,6 +215,83 @@ func GetRuleValueFromRawFromCache(cache map[string]common.CheckCoreCache, checkK
 	}
 }
 
+// replaceFromRawPlaceholders scans the input string and replaces all occurrences of
+// dynamic references starting with "_$" (e.g., _$field, _$a.b.c) with
+// their corresponding values extracted from data using the rule cache.
+// If a field doesn't exist, the placeholder is kept as-is.
+//
+// Example:
+//
+//	input:  "Detected scanning behavior from _$src to _$dst"
+//	output: "Detected scanning behavior from 192.168.1.1 to 10.0.0.1" (assuming data.src and data.dst exist)
+//	if data.src exists but data.dst doesn't:
+//	output: "Detected scanning behavior from 192.168.1.1 to _$dst"
+func replaceFromRawPlaceholders(cache map[string]common.CheckCoreCache, input string, data map[string]interface{}) string {
+	// Fast path: no marker
+	if len(input) < 2 || !strings.Contains(input, FromRawSymbol) {
+		return input
+	}
+
+	// Use a builder to avoid excessive allocations
+	var b strings.Builder
+	b.Grow(len(input))
+
+	for i := 0; i < len(input); {
+		// Escape handling: "\_$" -> output "_$" literally
+		if input[i] == '\\' {
+			if i+2 < len(input) && input[i+1] == '_' && input[i+2] == '$' {
+				b.WriteByte('_')
+				b.WriteByte('$')
+				i += 3
+				continue
+			}
+			// Not an escape for _$, write the backslash and continue
+			b.WriteByte(input[i])
+			i++
+			continue
+		}
+
+		// Look for "_$"
+		if i+1 < len(input) && input[i] == '_' && input[i+1] == '$' {
+			// Parse variable path: letters, digits, '_', '.', '#'
+			j := i + 2
+			for j < len(input) {
+				c := input[j]
+				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '#' {
+					j++
+					continue
+				}
+				break
+			}
+			// If only "_$" without name, treat as literal
+			if j == i+2 {
+				b.WriteByte(input[i])
+				i++
+				continue
+			}
+			key := input[i:j] // includes "_$"
+
+			// Check if field exists; only replace if it exists
+			fieldPath := input[i+2 : j] // without "_$" prefix
+			checkKeyList := common.StringToList(strings.TrimSpace(fieldPath))
+			val, exist := GetCheckDataFromCache(cache, key, data, checkKeyList)
+
+			if exist {
+				b.WriteString(val)
+			} else {
+				// Field doesn't exist, keep the original placeholder
+				b.WriteString(key)
+			}
+			i = j
+			continue
+		}
+		// Normal char flow
+		b.WriteByte(input[i])
+		i++
+	}
+	return b.String()
+}
+
 func GetCheckDataFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}, checkKeyList []string) (res string, exist bool) {
 	tmpRes, ok := cache[checkKey]
 	if ok {

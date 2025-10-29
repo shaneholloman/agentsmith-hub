@@ -826,9 +826,9 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data m
 	}
 	if appendOp.Type == "" {
 		appendData := appendOp.Value
-		if hasFromRawPrefix(appendOp.Value) {
-			appendData = GetRuleValueFromRawFromCache(ruleCache, appendOp.Value, data)
-		}
+		// Support inline interpolation of multiple _$placeholders in static text
+		// Covers both full replacement (value starts with "_$") and mixed templates
+		appendData = replaceFromRawPlaceholders(ruleCache, appendData, data)
 
 		modifiedData[appendOp.FieldName] = appendData
 	} else {
