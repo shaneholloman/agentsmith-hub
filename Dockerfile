@@ -69,6 +69,7 @@ ENV LOG_LEVEL=info
 ENV NODE_ID=default
 ENV MODE=leader
 ENV SIMD_ENABLED=false
+ENV GOEXPERIMENT=greenteagc
 
 # Expose ports
 EXPOSE 8080 80

@@ -72,6 +72,7 @@ backend:
 			echo "Native build for $(TARGET_GOARCH)..."; \
 			cd $(BACKEND_DIR) && \
 			CGO_ENABLED=1 \
+			GOEXPERIMENT=greenteagc \
 			CGO_LDFLAGS="-L$(PWD)/$(LIB_PATH) -lrure" \
 			GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
 			go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME)-$(TARGET_GOARCH) .; \
@@ -81,12 +82,14 @@ backend:
 				cd $(BACKEND_DIR) && \
 				CC=aarch64-linux-gnu-gcc \
 				CGO_ENABLED=1 \
+				GOEXPERIMENT=greenteagc \
 				CGO_LDFLAGS="-L$(PWD)/$(LIB_PATH) -lrure" \
 				GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
 				go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME)-$(TARGET_GOARCH) .; \
 			else \
 				cd $(BACKEND_DIR) && \
 				CGO_ENABLED=1 \
+				GOEXPERIMENT=greenteagc \
 				CGO_LDFLAGS="-L$(PWD)/$(LIB_PATH) -lrure" \
 				GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
 				go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME)-$(TARGET_GOARCH) .; \
@@ -107,11 +110,12 @@ backend-docker:
 		docker run --rm -v "$(PWD):/workspace" -w /workspace/$(BACKEND_DIR) \
 			-e CGO_ENABLED=1 \
 			-e CC=aarch64-linux-gnu-gcc \
+				-e GOEXPERIMENT=greenteagc \
 			-e GOOS=linux \
 			-e GOARCH=arm64 \
 			-e CGO_LDFLAGS="-L/workspace/lib/linux/arm64 -lrure -Wl,-rpath,/workspace/lib/linux/arm64" \
 			-e LD_LIBRARY_PATH="/workspace/lib/linux/arm64" \
-			golang:1.21 \
+				golang:1.25 \
 			sh -c "apt-get update && apt-get install -y build-essential gcc-aarch64-linux-gnu && \
 				echo 'Library files:' && ls -la /workspace/lib/linux/arm64/ && \
 				cp /workspace/lib/linux/arm64/librure.so /usr/lib/ && ldconfig && \
@@ -120,11 +124,12 @@ backend-docker:
 		echo "Building for AMD64 architecture..."; \
 		docker run --rm -v "$(PWD):/workspace" -w /workspace/$(BACKEND_DIR) \
 			-e CGO_ENABLED=1 \
+				-e GOEXPERIMENT=greenteagc \
 			-e GOOS=linux \
 			-e GOARCH=amd64 \
 			-e CGO_LDFLAGS="-L/workspace/lib/linux/amd64 -lrure -Wl,-rpath,/workspace/lib/linux/amd64" \
 			-e LD_LIBRARY_PATH="/workspace/lib/linux/amd64" \
-			golang:1.21 \
+				golang:1.25 \
 			sh -c "apt-get update && apt-get install -y build-essential && \
 				echo 'Library files:' && ls -la /workspace/lib/linux/amd64/ && \
 				cp /workspace/lib/linux/amd64/librure.so /usr/lib/ && ldconfig && \

@@ -364,6 +364,8 @@ check_config() {
 # Main function
 main() {
     print_info "Starting AgentSmith-HUB..."
+    # Enable GreenTea GC if not explicitly set
+    export GOEXPERIMENT=${GOEXPERIMENT:-greenteagc}
     
     # Find binary
     BINARY_PATH=$(find_binary)
