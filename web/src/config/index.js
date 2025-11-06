@@ -35,6 +35,16 @@ const envConfig = {
 // Runtime configuration (loaded from external file)
 let runtimeConfig = {};
 
+// Merged configuration object that preserves reference for consumers
+const config = {
+  ...defaultConfig,
+  ...envConfig
+};
+
+function applyMergedConfig() {
+  Object.assign(config, getConfig());
+}
+
 /**
  * Load runtime configuration from external file
  * This allows configuration changes without recompilation
@@ -50,8 +60,9 @@ async function loadRuntimeConfig() {
     });
     
     if (response.ok) {
-      const config = await response.json();
-      runtimeConfig = config;
+      const loadedConfig = await response.json();
+      runtimeConfig = loadedConfig || {};
+      applyMergedConfig();
       console.log('Runtime configuration loaded successfully');
       return config;
     }
@@ -59,6 +70,7 @@ async function loadRuntimeConfig() {
     console.debug('No runtime configuration file found, using default configuration');
   }
   
+  applyMergedConfig();
   return {};
 }
 
@@ -81,18 +93,25 @@ let configPromise = null;
  * Initialize configuration asynchronously
  */
 async function initializeConfig() {
-  if (configPromise) {
-    return configPromise;
+  if (!configPromise) {
+    configPromise = (async () => {
+      await loadRuntimeConfig();
+      return getConfig();
+    })();
   }
-  
-  configPromise = loadRuntimeConfig();
-  await configPromise;
-  
-  return getConfig();
+
+  try {
+    const merged = await configPromise;
+    applyMergedConfig();
+    return merged;
+  } catch (error) {
+    applyMergedConfig();
+    throw error;
+  }
 }
 
-// Export the configuration
-const config = getConfig();
+// Ensure config has initial merged values
+applyMergedConfig();
 
 // Configuration hot reload removed - use smart refresh system for config updates
 

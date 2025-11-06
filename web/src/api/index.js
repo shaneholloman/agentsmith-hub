@@ -1,5 +1,5 @@
 import axios from 'axios';
-import config from '../config';
+import config, { initializeConfig } from '../config';
 
 const api = axios.create({
   baseURL: config.apiBaseUrl,
@@ -17,6 +17,21 @@ const publicApi = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+initializeConfig()
+  .then((resolvedConfig) => {
+    if (!resolvedConfig) {
+      return;
+    }
+
+    api.defaults.baseURL = resolvedConfig.apiBaseUrl;
+    api.defaults.timeout = resolvedConfig.apiTimeout;
+    publicApi.defaults.baseURL = resolvedConfig.apiBaseUrl;
+    publicApi.defaults.timeout = resolvedConfig.apiTimeout;
+  })
+  .catch((error) => {
+    console.warn('Failed to apply runtime configuration to API clients:', error);
+  });
 
 /**
  * Handles API errors consistently
