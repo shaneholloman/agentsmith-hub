@@ -2018,8 +2018,8 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 	if needsCache {
 		var err error
 		newRuleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
-			NumCounters: 10_000_000,       // number of keys to track frequency of.
-			MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+			NumCounters: 1_000_000,        // number of keys to track frequency of.
+			MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 			BufferItems: 256,              // number of keys per Get buffer.
 		})
 		if err != nil {
@@ -2030,8 +2030,8 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 	if needsClassifyCache {
 		var err error
 		newRuleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
-			NumCounters: 10_000_000,       // number of keys to track frequency of.
-			MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+			NumCounters: 1_000_000,        // number of keys to track frequency of.
+			MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 			BufferItems: 256,              // number of keys per Get buffer.
 		})
 		if err != nil {
@@ -2324,8 +2324,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 				// Initialize cache if needed for checklist thresholds
 				if threshold.LocalCache && !createLocalCache {
 					ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
-						NumCounters: 10_000_000,       // number of keys to track frequency of.
-						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						NumCounters: 1_000_000,        // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 						BufferItems: 32,               // number of keys per Get buffer.
 					})
 
@@ -2337,8 +2337,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 				if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
 					ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
-						NumCounters: 10_000_000,       // number of keys to track frequency of.
-						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						NumCounters: 1_000_000,        // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 						BufferItems: 32,               // number of keys per Get buffer.
 					})
 
@@ -2516,8 +2516,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 			if !createLocalCache {
 				ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
-					NumCounters: 10_000_000,       // number of keys to track frequency of.
-					MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+					NumCounters: 1_000_000,        // number of keys to track frequency of.
+					MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 					BufferItems: 32,               // number of keys per Get buffer.
 				})
 
@@ -2530,8 +2530,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 			if threshold.CountType == "CLASSIFY" {
 				if !createLocalCacheForClassify {
 					ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
-						NumCounters: 10_000_000,       // number of keys to track frequency of.
-						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						NumCounters: 1_000_000,        // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 						BufferItems: 32,               // number of keys per Get buffer.
 					})
 
@@ -2601,8 +2601,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 				// Initialize cache if needed for iterator thresholds
 				if threshold.LocalCache && !createLocalCache {
 					ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
-						NumCounters: 10_000_000,       // number of keys to track frequency of.
-						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						NumCounters: 1_000_000,        // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 						BufferItems: 32,               // number of keys per Get buffer.
 					})
 
@@ -2614,8 +2614,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 				if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
 					ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
-						NumCounters: 10_000_000,       // number of keys to track frequency of.
-						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						NumCounters: 1_000_000,        // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 16, // maximum cost of cache.
 						BufferItems: 32,               // number of keys per Get buffer.
 					})
 
@@ -2680,8 +2680,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 					if threshold.LocalCache && !createLocalCache {
 						var err error
 						ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
-							NumCounters: 10_000_000,
-							MaxCost:     1024 * 1024 * 64,
+							NumCounters: 1_000_000,
+							MaxCost:     1024 * 1024 * 16,
 							BufferItems: 32,
 						})
 						if err != nil {
@@ -2692,8 +2692,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 					if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
 						var err error
 						ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
-							NumCounters: 10_000_000,
-							MaxCost:     1024 * 1024 * 64,
+							NumCounters: 1_000_000,
+							MaxCost:     1024 * 1024 * 16,
 							BufferItems: 32,
 						})
 						if err != nil {
